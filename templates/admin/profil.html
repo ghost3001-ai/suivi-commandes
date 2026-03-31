@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Mon profil{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-person-circle"></i> Mon profil
+    </h1>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5><i class="bi bi-info-circle"></i> Informations personnelles</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">Nom d'utilisateur</label>
+                        <input type="text" class="form-control" value="{{ utilisateur.username }}" disabled>
+                        <small class="text-muted">Le nom d'utilisateur ne peut pas être modifié</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Nom complet</label>
+                        <input type="text" name="nom_complet" class="form-control" 
+                               value="{{ utilisateur.nom_complet or '' }}">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" name="email" class="form-control" required 
+                               value="{{ utilisateur.email }}">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Téléphone</label>
+                        <input type="text" name="telephone" class="form-control" 
+                               value="{{ utilisateur.telephone or '' }}">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Rôle</label>
+                        <input type="text" class="form-control" value="{{ 'Administrateur' if utilisateur.role == 'admin' else 'Spectateur' }}" disabled>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save"></i> Mettre à jour
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5><i class="bi bi-key"></i> Changer le mot de passe</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" id="passwordForm">
+                    <div class="mb-3">
+                        <label class="form-label">Ancien mot de passe</label>
+                        <input type="password" name="ancien_password" class="form-control" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Nouveau mot de passe</label>
+                        <input type="password" name="nouveau_password" class="form-control" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Confirmer le nouveau mot de passe</label>
+                        <input type="password" name="confirmer_password" class="form-control" required>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-warning">
+                        <i class="bi bi-key"></i> Changer le mot de passe
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card shadow-sm mt-3">
+            <div class="card-header bg-white">
+                <h5><i class="bi bi-clock-history"></i> Informations de session</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-6">Dernière connexion</dt>
+                    <dd class="col-sm-6">{{ format_date(utilisateur.last_login) or '-' }}</dd>
+                    
+                    <dt class="col-sm-6">Compte créé le</dt>
+                    <dd class="col-sm-6">{{ format_date(utilisateur.created_at) }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('passwordForm')?.addEventListener('submit', function(e) {
+    const nouveau = document.querySelector('[name="nouveau_password"]').value;
+    const confirmer = document.querySelector('[name="confirmer_password"]').value;
+    
+    if (nouveau !== confirmer) {
+        e.preventDefault();
+        alert('Les nouveaux mots de passe ne correspondent pas');
+    } else if (nouveau.length < 6) {
+        e.preventDefault();
+        alert('Le mot de passe doit contenir au moins 6 caractères');
+    }
+});
+</script>
+{% endblock %}

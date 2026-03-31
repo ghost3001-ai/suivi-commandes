@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}Performances{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-graph-up"></i> Tableau de bord des performances
+    </h1>
+    <div class="btn-toolbar">
+        <button onclick="window.print()" class="btn btn-outline-secondary">
+            <i class="bi bi-printer"></i> Imprimer
+        </button>
+    </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-bleu shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted text-uppercase">Commandes totales</small>
+                        <h2 class="mb-0 mt-1" id="totalCommandes">-</h2>
+                    </div>
+                    <div class="stat-icon text-primary">
+                        <i class="bi bi-cart-check"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-vert shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted text-uppercase">Montant total</small>
+                        <h2 class="mb-0 mt-1" id="montantTotal">-</h2>
+                    </div>
+                    <div class="stat-icon text-success">
+                        <i class="bi bi-currency-dollar"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-rouge shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted text-uppercase">À payer</small>
+                        <h2 class="mb-0 mt-1" id="montantAPayer">-</h2>
+                    </div>
+                    <div class="stat-icon text-danger">
+                        <i class="bi bi-exclamation-triangle"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-orange shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted text-uppercase">Taux de retard</small>
+                        <h2 class="mb-0 mt-1" id="tauxRetard">-</h2>
+                    </div>
+                    <div class="stat-icon text-warning">
+                        <i class="bi bi-clock-history"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Navigation Cards -->
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <a href="{{ url_for('performances_acheteurs') }}" class="text-decoration-none">
+            <div class="card shadow-sm h-100 text-center hover-card">
+                <div class="card-body py-4">
+                    <i class="bi bi-person-badge fs-1 text-primary"></i>
+                    <h4 class="mt-2">Acheteurs</h4>
+                    <p class="text-muted">Performance par acheteur, volumes d'achat, délais</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4 mb-3">
+        <a href="{{ url_for('performances_fournisseurs') }}" class="text-decoration-none">
+            <div class="card shadow-sm h-100 text-center hover-card">
+                <div class="card-body py-4">
+                    <i class="bi bi-truck fs-1 text-success"></i>
+                    <h4 class="mt-2">Fournisseurs</h4>
+                    <p class="text-muted">Performance par fournisseur, délais de livraison, fiabilité</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4 mb-3">
+        <a href="{{ url_for('performances_produits') }}" class="text-decoration-none">
+            <div class="card shadow-sm h-100 text-center hover-card">
+                <div class="card-body py-4">
+                    <i class="bi bi-box-seam fs-1 text-warning"></i>
+                    <h4 class="mt-2">Produits</h4>
+                    <p class="text-muted">Produits les plus achetés, tendances d'achat</p>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<!-- Top Performers Row -->
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-trophy"></i> Top 5 Acheteurs</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartTopAcheteurs" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-trophy"></i> Top 5 Fournisseurs</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartTopFournisseurs" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Répartition par entité</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartParEntite" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Répartition par statut</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartParStatut" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.hover-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.hover-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+}
+</style>
+
+<script>
+// Chargement des données API
+fetch('/api/performances/global')
+    .then(response => response.json())
+    .then(data => {
+        // Mise à jour des KPI
+        document.getElementById('totalCommandes').textContent = data.total_commandes;
+        document.getElementById('montantTotal').textContent = 
+            new Intl.NumberFormat('fr-FR').format(data.total_montant) + ' FCFA';
+        
+        // Top acheteurs
+        const ctxAcheteurs = document.getElementById('chartTopAcheteurs').getContext('2d');
+        new Chart(ctxAcheteurs, {
+            type: 'bar',
+            data: {
+                labels: data.top_acheteurs.map(a => a.acheteur),
+                datasets: [{
+                    label: 'Montant (FCFA)',
+                    data: data.top_acheteurs.map(a => a.montant),
+                    backgroundColor: '#2c3e6d',
+                    borderRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                scales: { y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString() } } }
+            }
+        });
+        
+        // Top fournisseurs
+        const ctxFournisseurs = document.getElementById('chartTopFournisseurs').getContext('2d');
+        new Chart(ctxFournisseurs, {
+            type: 'bar',
+            data: {
+                labels: data.top_fournisseurs.map(f => f.fournisseur),
+                datasets: [{
+                    label: 'Montant (FCFA)',
+                    data: data.top_fournisseurs.map(f => f.montant),
+                    backgroundColor: '#28a745',
+                    borderRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                scales: { y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString() } } }
+            }
+        });
+        
+        // Répartition par entité
+        const ctxEntite = document.getElementById('chartParEntite').getContext('2d');
+        new Chart(ctxEntite, {
+            type: 'doughnut',
+            data: {
+                labels: data.par_entite.map(e => e.entite),
+                datasets: [{
+                    data: data.par_entite.map(e => e.montant),
+                    backgroundColor: ['#2c3e6d', '#3498db', '#5dade2']
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: true }
+        });
+        
+        // Répartition par statut
+        const ctxStatut = document.getElementById('chartParStatut').getContext('2d');
+        new Chart(ctxStatut, {
+            type: 'pie',
+            data: {
+                labels: data.par_statut.map(s => s.statut),
+                datasets: [{
+                    data: data.par_statut.map(s => s.count),
+                    backgroundColor: ['#28a745', '#dc3545']
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: true }
+        });
+        
+        // Calcul du taux de retard (à partir des données existantes)
+        fetch('/api/commandes')
+            .then(res => res.json())
+            .then(commandes => {
+                const enRetard = commandes.filter(c => c.delai > 0).length;
+                const taux = (enRetard / commandes.length * 100).toFixed(1);
+                document.getElementById('tauxRetard').textContent = taux + '%';
+                
+                const montantAPayer = commandes.filter(c => c.statut === 'A PAYER').reduce((sum, c) => sum + (c.solde || 0), 0);
+                document.getElementById('montantAPayer').textContent = 
+                    new Intl.NumberFormat('fr-FR').format(montantAPayer) + ' FCFA';
+            });
+    });
+</script>
+{% endblock %}

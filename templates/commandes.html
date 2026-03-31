@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Liste des commandes{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-list-check"></i> Commandes
+    </h1>
+    <div class="btn-toolbar">
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <form action="{{ url_for('importer_excel') }}" method="POST" enctype="multipart/form-data" class="d-inline me-2">
+            <input type="file" name="fichier" accept=".xlsx,.xls" class="d-none" id="importFile">
+            <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('importFile').click()">
+                <i class="bi bi-upload"></i> Importer
+            </button>
+        </form>
+        <a href="{{ url_for('exporter_excel') }}" class="btn btn-success me-2">
+            <i class="bi bi-file-excel"></i> Exporter
+        </a>
+        <a href="{{ url_for('ajouter_commande') }}" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> Nouvelle
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Filtres -->
+<div class="filters-bar">
+    <form method="GET" class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Entité</label>
+            <select name="entite" class="form-select">
+                <option value="">Toutes</option>
+                {% for e in entites %}
+                <option value="{{ e }}" {% if filtres.entite == e %}selected{% endif %}>{{ e }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Statut</label>
+            <select name="statut" class="form-select">
+                <option value="">Tous</option>
+                <option value="PAYER" {% if filtres.statut == 'PAYER' %}selected{% endif %}>PAYER</option>
+                <option value="A PAYER" {% if filtres.statut == 'A PAYER' %}selected{% endif %}>À PAYER</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Acheteur</label>
+            <select name="acheteur" class="form-select">
+                <option value="">Tous</option>
+                {% for a in acheteurs %}
+                <option value="{{ a }}" {% if filtres.acheteur == a %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Recherche</label>
+            <input type="text" name="recherche" class="form-control" placeholder="Affaire, demandeur..." value="{{ request.args.get('recherche', '') }}">
+        </div>
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-funnel"></i> Filtrer
+            </button>
+            <a href="{{ url_for('commandes') }}" class="btn btn-secondary">
+                <i class="bi bi-arrow-repeat"></i> Réinitialiser
+            </a>
+        </div>
+    </form>
+</div>
+
+<!-- Tableau des commandes -->
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Nr.</th>
+                        <th>Date CDE</th>
+                        <th>Entité</th>
+                        <th>Demandeur</th>
+                        <th>Fournisseur</th>
+                        <th>Montant</th>
+                        <th>Solde</th>
+                        <th>Statut</th>
+                        <th>Délai</th>
+                        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+                        <th>Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in commandes %}
+                    <tr {% if c.est_en_retard() %}class="table-warning"{% endif %}>
+                        <td><a href="{{ url_for('voir_commande', id=c.id) }}">{{ c.nr or '-' }}</a></td>
+                        <td>{{ format_date(c.date_cde) }}</td>
+                        <td><span class="badge bg-secondary">{{ c.entite or '-' }}</span></td>
+                        <td>{{ c.demandeur or '-' }}</td>
+                        <td>{{ c.fournisseur.nom if c.fournisseur else '-' }}</td>
+                        <td class="text-end">{{ "{:,.0f}".format(c.montant) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(c.solde) }} FCFA</td>
+                        <td>
+                            <span class="badge {% if c.statut == 'PAYER' %}bg-success{% else %}bg-danger{% endif %}">
+                                {{ c.statut or '-' }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if c.est_en_retard() %}
+                            <span class="badge badge-retard">+{{ c.get_delai() }}j</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <a href="{{ url_for('modifier_commande', id=c.id) }}" class="btn btn-outline-primary">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <a href="{{ url_for('supprimer_commande', id=c.id) }}" class="btn btn-outline-danger" 
+                                   onclick="return confirm('Supprimer cette commande ?')">
+                                    <i class="bi bi-trash"></i>
+                                </a>
+                            </div>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="{% if current_user.is_authenticated and current_user.role == 'admin' %}10{% else %}9{% endif %}" class="text-center py-4 text-muted">
+                            <i class="bi bi-inbox fs-1"></i><br>
+                            Aucune commande trouvée
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('importFile')?.addEventListener('change', function(e) {
+        if (e.target.files.length > 0) {
+            const form = e.target.closest('form');
+            const submitBtn = document.createElement('button');
+            submitBtn.type = 'submit';
+            submitBtn.style.display = 'none';
+            form.appendChild(submitBtn);
+            submitBtn.click();
+        }
+    });
+</script>
+{% endblock %}

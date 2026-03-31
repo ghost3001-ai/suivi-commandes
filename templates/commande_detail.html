@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Commande #{{ commande.nr }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-receipt"></i> Commande #{{ commande.nr or 'Nouvelle' }}
+    </h1>
+    <div>
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <a href="{{ url_for('modifier_commande', id=commande.id) }}" class="btn btn-warning">
+            <i class="bi bi-pencil"></i> Modifier
+        </a>
+        <a href="{{ url_for('supprimer_commande', id=commande.id) }}" class="btn btn-danger" 
+           onclick="return confirm('Supprimer cette commande ?')">
+            <i class="bi bi-trash"></i> Supprimer
+        </a>
+        {% endif %}
+        <a href="{{ url_for('commandes') }}" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Retour
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Informations générales</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5">N° Commande</dt>
+                            <dd class="col-sm-7">{{ commande.nr or '-' }}</dd>
+                            
+                            <dt class="col-sm-5">Date commande</dt>
+                            <dd class="col-sm-7">{{ format_date(commande.date_cde) }}</dd>
+                            
+                            <dt class="col-sm-5">Entité</dt>
+                            <dd class="col-sm-7">
+                                <span class="badge bg-secondary">{{ commande.entite or '-' }}</span>
+                            </dd>
+                            
+                            <dt class="col-sm-5">Demandeur</dt>
+                            <dd class="col-sm-7">{{ commande.demandeur or '-' }}</dd>
+                            
+                            <dt class="col-sm-5">Service demandeur</dt>
+                            <dd class="col-sm-7">{{ commande.service_demandeur or '-' }}</dd>
+                        </dl>
+                    </div>
+                    <div class="col-md-6">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-5">Acheteur</dt>
+                            <dd class="col-sm-7">{{ commande.acheteur or '-' }}</dd>
+                            
+                            <dt class="col-sm-5">Fournisseur</dt>
+                            <dd class="col-sm-7">{{ commande.fournisseur.nom if commande.fournisseur else '-' }}</dd>
+                            
+                            <dt class="col-sm-5">N° Bon commande</dt>
+                            <dd class="col-sm-7">{{ commande.bon_commande or '-' }}</dd>
+                            
+                            <dt class="col-sm-5">N° Facture</dt>
+                            <dd class="col-sm-7">{{ commande.facture or '-' }}</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-box-seam"></i> Détails de la commande</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-3">Affaire / Description</dt>
+                    <dd class="col-sm-9">{{ commande.affaire or '-' }}</dd>
+                    
+                    <dt class="col-sm-3">Date livraison</dt>
+                    <dd class="col-sm-9">
+                        {{ format_date(commande.date_livraison) }}
+                        {% if commande.est_en_retard() %}
+                        <span class="badge badge-retard ms-2">En retard (+{{ commande.get_delai() }}j)</span>
+                        {% endif %}
+                    </dd>
+                    
+                    <dt class="col-sm-3">N° Bon livraison</dt>
+                    <dd class="col-sm-9">{{ commande.bon_livraison or '-' }}</dd>
+                    
+                    <dt class="col-sm-3">Commentaire</dt>
+                    <dd class="col-sm-9">{{ commande.commentaire or '-' }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-calculator"></i> Informations financières</h5>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-3">
+                    <div class="display-6">{{ "{:,.0f}".format(commande.montant) }} FCFA</div>
+                    <small class="text-muted">Montant total</small>
+                </div>
+                <hr>
+                <dl class="row mb-0">
+                    <dt class="col-sm-6">Avance versée</dt>
+                    <dd class="col-sm-6 text-end">{{ "{:,.0f}".format(commande.avance) }} FCFA</dd>
+                    
+                    <dt class="col-sm-6">Solde restant</dt>
+                    <dd class="col-sm-6 text-end {% if commande.solde > 0 %}text-danger{% else %}text-success{% endif %}">
+                        <strong>{{ "{:,.0f}".format(commande.solde) }} FCFA</strong>
+                    </dd>
+                    
+                    <dt class="col-sm-6">Statut</dt>
+                    <dd class="col-sm-6 text-end">
+                        <span class="badge {% if commande.statut == 'PAYER' %}bg-success{% else %}bg-danger{% endif %} fs-6">
+                            {{ commande.statut or '-' }}
+                        </span>
+                    </dd>
+                    
+                    <dt class="col-sm-6">Date paiement</dt>
+                    <dd class="col-sm-6 text-end">{{ format_date(commande.date_paiement) or '-' }}</dd>
+                </dl>
+            </div>
+        </div>
+        
+        {% if commande.fournisseur %}
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-truck"></i> Contact fournisseur</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-5">Nom</dt>
+                    <dd class="col-sm-7">{{ commande.fournisseur.nom }}</dd>
+                    
+                    {% if commande.fournisseur.pays %}
+                    <dt class="col-sm-5">Pays</dt>
+                    <dd class="col-sm-7">{{ commande.fournisseur.pays }}</dd>
+                    {% endif %}
+                    
+                    {% if commande.fournisseur.telephone1 %}
+                    <dt class="col-sm-5">Téléphone</dt>
+                    <dd class="col-sm-7">{{ commande.fournisseur.telephone1 }}</dd>
+                    {% endif %}
+                    
+                    {% if commande.fournisseur.email1 %}
+                    <dt class="col-sm-5">Email</dt>
+                    <dd class="col-sm-7">{{ commande.fournisseur.email1 }}</dd>
+                    {% endif %}
+                </dl>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

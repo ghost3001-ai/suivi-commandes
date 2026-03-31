@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}{{ titre }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-person-plus"></i> {{ titre }}
+    </h1>
+    <a href="{{ url_for('admin_utilisateurs') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Retour
+    </a>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <form method="POST">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Nom d'utilisateur *</label>
+                    <input type="text" name="username" class="form-control" required 
+                           value="{{ utilisateur.username if utilisateur else '' }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Email *</label>
+                    <input type="email" name="email" class="form-control" required 
+                           value="{{ utilisateur.email if utilisateur else '' }}">
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Nom complet</label>
+                    <input type="text" name="nom_complet" class="form-control" 
+                           value="{{ utilisateur.nom_complet if utilisateur else '' }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Téléphone</label>
+                    <input type="text" name="telephone" class="form-control" 
+                           value="{{ utilisateur.telephone if utilisateur else '' }}">
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Rôle *</label>
+                    <select name="role" class="form-select" required>
+                        <option value="spectateur" {% if utilisateur and utilisateur.role == 'spectateur' %}selected{% endif %}>
+                            Spectateur (lecture seule)
+                        </option>
+                        <option value="admin" {% if utilisateur and utilisateur.role == 'admin' %}selected{% endif %}>
+                            Administrateur (gestion complète)
+                        </option>
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Statut</label>
+                    <div class="form-check mt-2">
+                        <input type="checkbox" name="actif" class="form-check-input" 
+                               {% if not utilisateur or utilisateur.actif %}checked{% endif %}>
+                        <label class="form-check-label">Compte actif</label>
+                    </div>
+                </div>
+            </div>
+            
+            {% if not utilisateur %}
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Mot de passe *</label>
+                    <input type="password" name="password" class="form-control" required>
+                    <small class="text-muted">Minimum 6 caractères</small>
+                </div>
+            </div>
+            {% else %}
+            <div class="card bg-light mb-3">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-key"></i> Changer le mot de passe</h6>
+                    <div class="row">
+                        <div class="col-md-6 mb-2">
+                            <input type="password" name="new_password" class="form-control" placeholder="Nouveau mot de passe">
+                        </div>
+                        <div class="col-md-6 mb-2">
+                            <input type="password" name="confirm_password" class="form-control" placeholder="Confirmer le mot de passe">
+                        </div>
+                    </div>
+                    <small class="text-muted">Laisser vide pour conserver le mot de passe actuel</small>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-save"></i> Enregistrer
+                </button>
+                <a href="{{ url_for('admin_utilisateurs') }}" class="btn btn-secondary">
+                    <i class="bi bi-x-circle"></i> Annuler
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

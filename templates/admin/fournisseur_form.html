@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}{{ titre }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-building"></i> {{ titre }}
+    </h1>
+    <a href="{{ url_for('fournisseurs') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Retour
+    </a>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <form method="POST">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Nom *</label>
+                    <input type="text" name="nom" class="form-control" required value="{{ fournisseur.nom if fournisseur else '' }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Statut juridique</label>
+                    <input type="text" name="statut_juridique" class="form-control" value="{{ fournisseur.statut_juridique if fournisseur else '' }}">
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Pays</label>
+                    <input type="text" name="pays" class="form-control" value="{{ fournisseur.pays if fournisseur else '' }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Ville</label>
+                    <input type="text" name="ville" class="form-control" value="{{ fournisseur.ville if fournisseur else '' }}">
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Dirigeant / Contact</label>
+                    <input type="text" name="dirigeant" class="form-control" value="{{ fournisseur.dirigeant if fournisseur else '' }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Catégorie</label>
+                    <input type="text" name="categorie" class="form-control" value="{{ fournisseur.categorie if fournisseur else '' }}">
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Téléphone 1</label>
+                    <input type="text" name="telephone1" class="form-control" value="{{ fournisseur.telephone1 if fournisseur else '' }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Téléphone 2</label>
+                    <input type="text" name="telephone2" class="form-control" value="{{ fournisseur.telephone2 if fournisseur else '' }}">
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Email 1</label>
+                    <input type="email" name="email1" class="form-control" value="{{ fournisseur.email1 if fournisseur else '' }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Email 2</label>
+                    <input type="email" name="email2" class="form-control" value="{{ fournisseur.email2 if fournisseur else '' }}">
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Statut</label>
+                    <select name="statut" class="form-select">
+                        <option value="Actif" {% if fournisseur and fournisseur.statut == 'Actif' %}selected{% endif %}>Actif</option>
+                        <option value="Inactif" {% if fournisseur and fournisseur.statut == 'Inactif' %}selected{% endif %}>Inactif</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-save"></i> Enregistrer
+                </button>
+                <a href="{{ url_for('fournisseurs') }}" class="btn btn-secondary">
+                    <i class="bi bi-x-circle"></i> Annuler
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

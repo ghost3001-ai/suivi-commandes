@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+
+{% block title %}Tableau de bord{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-speedometer2"></i> Tableau de bord
+    </h1>
+    <div class="btn-toolbar">
+        <a href="{{ url_for('exporter_excel') }}" class="btn btn-success me-2">
+            <i class="bi bi-file-excel"></i> Exporter Excel
+        </a>
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <a href="{{ url_for('ajouter_commande') }}" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> Nouvelle commande
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-bleu shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted text-uppercase">Total commandes</small>
+                        <h2 class="mb-0 mt-1">{{ total_commandes }}</h2>
+                    </div>
+                    <div class="stat-icon text-primary">
+                        <i class="bi bi-cart-check"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-vert shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted text-uppercase">Montant total</small>
+                        <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(montant_total) }} FCFA</h2>
+                    </div>
+                    <div class="stat-icon text-success">
+                        <i class="bi bi-currency-dollar"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-rouge shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted text-uppercase">À payer</small>
+                        <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_a_payer) }} FCFA</h2>
+                    </div>
+                    <div class="stat-icon text-danger">
+                        <i class="bi bi-exclamation-triangle"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-orange shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <small class="text-muted text-uppercase">Commandes en retard</small>
+                        <h2 class="mb-0 mt-1">{{ nb_retard }}</h2>
+                    </div>
+                    <div class="stat-icon text-warning">
+                        <i class="bi bi-clock-history"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Répartition par entité</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartEntite" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Évolution mensuelle</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartEvolution" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Top 5 fournisseurs</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartFournisseurs" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Répartition par statut</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartStatut" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Orders -->
+<div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-receipt"></i> Dernières commandes</h5>
+        <a href="{{ url_for('commandes') }}" class="btn btn-sm btn-outline-primary">Voir tout</a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Nr.</th>
+                        <th>Date CDE</th>
+                        <th>Entité</th>
+                        <th>Fournisseur</th>
+                        <th>Montant</th>
+                        <th>Solde</th>
+                        <th>Statut</th>
+                        <th>Délai</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in dernieres_commandes %}
+                    <tr {% if c.est_en_retard() %}class="table-warning"{% endif %}>
+                        <td><a href="{{ url_for('voir_commande', id=c.id) }}">{{ c.nr or '-' }}</a></td>
+                        <td>{{ format_date(c.date_cde) }}</td>
+                        <td><span class="badge bg-secondary">{{ c.entite or '-' }}</span></td>
+                        <td>{{ c.fournisseur.nom if c.fournisseur else '-' }}</td>
+                        <td class="text-end">{{ "{:,.0f}".format(c.montant) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(c.solde) }} FCFA</td>
+                        <td>
+                            <span class="badge {% if c.statut == 'PAYER' %}bg-success{% else %}bg-danger{% endif %}">
+                                {{ c.statut or '-' }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if c.est_en_retard() %}
+                            <span class="badge badge-retard">+{{ c.get_delai() }}j</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center py-4 text-muted">
+                            <i class="bi bi-inbox fs-1"></i><br>
+                            Aucune commande enregistrée
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Graphique par entité
+    const ctxEntite = document.getElementById('chartEntite').getContext('2d');
+    new Chart(ctxEntite, {
+        type: 'doughnut',
+        data: {
+            labels: [{% for e in par_entite %}'{{ e[0] }}',{% endfor %}],
+            datasets: [{
+                data: [{% for e in par_entite %}{{ e[1] }},{% endfor %}],
+                backgroundColor: ['#2c3e6d', '#3498db', '#5dade2', '#85c1e9'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+    
+    // Graphique évolution
+    const ctxEvolution = document.getElementById('chartEvolution').getContext('2d');
+    new Chart(ctxEvolution, {
+        type: 'line',
+        data: {
+            labels: [{% for e in evolution %}'{{ e.mois }}',{% endfor %}],
+            datasets: [{
+                label: 'Montant (FCFA)',
+                data: [{% for e in evolution %}{{ e.total }},{% endfor %}],
+                borderColor: '#2c3e6d',
+                backgroundColor: 'rgba(44, 62, 109, 0.1)',
+                tension: 0.3,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString() + ' FCFA';
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Graphique top fournisseurs
+    const ctxFourn = document.getElementById('chartFournisseurs').getContext('2d');
+    new Chart(ctxFourn, {
+        type: 'bar',
+        data: {
+            labels: [{% for f in top_fournisseurs %}'{{ f[0] }}',{% endfor %}],
+            datasets: [{
+                label: 'Montant total (FCFA)',
+                data: [{% for f in top_fournisseurs %}{{ f[1] }},{% endfor %}],
+                backgroundColor: '#2c3e6d',
+                borderRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Graphique par statut
+    const ctxStatut = document.getElementById('chartStatut').getContext('2d');
+    new Chart(ctxStatut, {
+        type: 'pie',
+        data: {
+            labels: [{% for s in par_statut %}'{{ s[0] }}',{% endfor %}],
+            datasets: [{
+                data: [{% for s in par_statut %}{{ s[1] }},{% endfor %}],
+                backgroundColor: ['#28a745', '#dc3545'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+</script>
+{% endblock %}

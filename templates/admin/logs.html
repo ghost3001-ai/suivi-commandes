@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Journal d'activité{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-journal-bookmark-fill"></i> Journal d'activité
+    </h1>
+</div>
+
+<!-- Filtres -->
+<div class="filters-bar">
+    <form method="GET" class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Action</label>
+            <select name="action" class="form-select">
+                <option value="">Toutes</option>
+                {% for a in actions %}
+                <option value="{{ a }}" {% if request.args.get('action') == a %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Table</label>
+            <select name="table" class="form-select">
+                <option value="">Toutes</option>
+                {% for t in tables %}
+                <option value="{{ t }}" {% if request.args.get('table') == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Utilisateur</label>
+            <select name="utilisateur" class="form-select">
+                <option value="">Tous</option>
+                {% for u in utilisateurs %}
+                <option value="{{ u.id }}" {% if request.args.get('utilisateur')|int == u.id %}selected{% endif %}>{{ u.username }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary w-100">
+                <i class="bi bi-funnel"></i> Filtrer
+            </button>
+        </div>
+    </form>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date/Heure</th>
+                        <th>Utilisateur</th>
+                        <th>Action</th>
+                        <th>Table</th>
+                        <th>ID</th>
+                        <th>Détails</th>
+                        <th>IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ log.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</td>
+                        <td>
+                            <strong>{{ log.utilisateur.username if log.utilisateur else 'Système' }}</strong>
+                        </td>
+                        <td>
+                            {% if log.action == 'CREATE' %}
+                            <span class="badge bg-success">CREATE</span>
+                            {% elif log.action == 'UPDATE' %}
+                            <span class="badge bg-warning">UPDATE</span>
+                            {% elif log.action == 'DELETE' %}
+                            <span class="badge bg-danger">DELETE</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ log.action }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ log.table }}</td>
+                        <td>{{ log.record_id or '-' }}</td>
+                        <td>{{ log.details[:100] }}{% if log.details and log.details|length > 100 %}...{% endif %}</td>
+                        <td><small>{{ log.ip_address or '-' }}</small></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% if logs|length == 0 %}
+<div class="text-center py-5 text-muted">
+    <i class="bi bi-inbox fs-1"></i>
+    <p class="mt-2">Aucun log trouvé</p>
+</div>
+{% endif %}
+{% endblock %}

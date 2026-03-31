@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}Performance {{ acheteur }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-person-badge"></i> Performance: {{ acheteur }}
+    </h1>
+    <a href="{{ url_for('performances_acheteurs') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Retour
+    </a>
+</div>
+
+<!-- KPI -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body">
+                <h6>Commandes</h6>
+                <h2>{{ total_commandes }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <h6>Montant total</h6>
+                <h5>{{ "{:,.0f}".format(total_montant) }} FCFA</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-danger text-white">
+            <div class="card-body">
+                <h6>À payer</h6>
+                <h5>{{ "{:,.0f}".format(montant_a_payer) }} FCFA</h5>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-dark">
+            <div class="card-body">
+                <h6>Taux de conversion</h6>
+                <h5>{{ ( (total_montant - montant_a_payer) / total_montant * 100 )|round(1) if total_montant > 0 else 0 }}%</h5>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-7 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5><i class="bi bi-graph-up"></i> Évolution mensuelle</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartEvolution" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-5 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5><i class="bi bi-truck"></i> Top fournisseurs</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartFournisseurs" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <h5><i class="bi bi-receipt"></i> Liste des commandes</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Nr.</th>
+                        <th>Date</th>
+                        <th>Fournisseur</th>
+                        <th>Montant</th>
+                        <th>Solde</th>
+                        <th>Statut</th>
+                        <th>Délai</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in commandes %}
+                    <tr>
+                        <td>{{ c.nr or '-' }}</td>
+                        <td>{{ c.date_cde.strftime('%d/%m/%Y') if c.date_cde else '-' }}</td>
+                        <td>{{ c.fournisseur.nom if c.fournisseur else '-' }}</td>
+                        <td class="text-end">{{ "{:,.0f}".format(c.montant) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(c.solde) }} FCFA</td>
+                        <td>
+                            <span class="badge {% if c.statut == 'PAYER' %}bg-success{% else %}bg-danger{% endif %}">
+                                {{ c.statut }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if c.est_en_retard() %}
+                            <span class="badge badge-retard">+{{ c.get_delai() }}j</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Graphique d'évolution
+    const ctxEvo = document.getElementById('chartEvolution').getContext('2d');
+    new Chart(ctxEvo, {
+        type: 'line',
+        data: {
+            labels: [{% for e in evolution %}'{{ e.mois }}',{% endfor %}],
+            datasets: [{
+                label: 'Montant (FCFA)',
+                data: [{% for e in evolution %}{{ e.total }},{% endfor %}],
+                borderColor: '#2c3e6d',
+                backgroundColor: 'rgba(44, 62, 109, 0.1)',
+                fill: true,
+                tension: 0.3
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: { y: { ticks: { callback: v => v.toLocaleString() } } }
+        }
+    });
+    
+    // Graphique top fournisseurs
+    const ctxFourn = document.getElementById('chartFournisseurs').getContext('2d');
+    new Chart(ctxFourn, {
+        type: 'bar',
+        data: {
+            labels: [{% for f in top_fournisseurs %}'{{ f[0] }}',{% endfor %}],
+            datasets: [{
+                label: 'Montant (FCFA)',
+                data: [{% for f in top_fournisseurs %}{{ f[2] }},{% endfor %}],
+                backgroundColor: '#28a745'
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: { y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString() } } }
+        }
+    });
+</script>
+{% endblock %}

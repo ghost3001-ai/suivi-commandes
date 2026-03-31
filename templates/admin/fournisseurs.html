@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Fournisseurs{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-truck"></i> Fournisseurs
+    </h1>
+    <a href="{{ url_for('ajouter_fournisseur') }}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i> Nouveau fournisseur
+    </a>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Nom</th>
+                        <th>Pays</th>
+                        <th>Ville</th>
+                        <th>Contact</th>
+                        <th>Catégorie</th>
+                        <th>Statut</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in fournisseurs %}
+                    <tr>
+                        <td><strong>{{ f.nom }}</strong></td>
+                        <td>{{ f.pays or '-' }}</td>
+                        <td>{{ f.ville or '-' }}</td>
+                        <td>
+                            {% if f.telephone1 %}{{ f.telephone1 }}{% endif %}
+                            {% if f.email1 %}<br><small class="text-muted">{{ f.email1 }}</small>{% endif %}
+                        </td>
+                        <td>{{ f.categorie or '-' }}</td>
+                        <td>
+                            <span class="badge {% if f.statut == 'Actif' %}bg-success{% else %}bg-secondary{% endif %}">
+                                {{ f.statut or 'Actif' }}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <a href="{{ url_for('modifier_fournisseur', id=f.id) }}" class="btn btn-outline-primary">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <a href="{{ url_for('supprimer_fournisseur', id=f.id) }}" class="btn btn-outline-danger" 
+                                   onclick="return confirm('Supprimer ce fournisseur ?')">
+                                    <i class="bi bi-trash"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-4 text-muted">
+                            <i class="bi bi-inbox fs-1"></i><br>
+                            Aucun fournisseur enregistré
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
