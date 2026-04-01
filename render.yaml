@@ -6,8 +6,7 @@ services:
     plan: free
     region: frankfurt
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: python init_app.py
-    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --worker-class sync --access-logfile - --error-logfile -
+    startCommand: python init_app.py && gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --worker-class sync --access-logfile - --error-logfile -
     healthCheckPath: /login
     envVars:
       - key: FLASK_ENV
