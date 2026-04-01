@@ -53,6 +53,8 @@ class Fournisseur(db.Model):
 
 class Commande(db.Model):
     __tablename__ = 'commandes'
+    STATUT_PAYE = 'PAYÉ'
+    STATUT_A_PAYER = 'A PAYER'
     
     id = db.Column(db.Integer, primary_key=True)
     nr = db.Column(db.Integer)
@@ -79,7 +81,10 @@ class Commande(db.Model):
     def calculer_solde(self):
         """Calcule le solde et met à jour le statut"""
         self.solde = self.montant - self.avance
-        self.statut = "PAYER" if self.solde <= 0 else "A PAYER"
+        self.statut = self.STATUT_PAYE if self.solde <= 0 else self.STATUT_A_PAYER
+
+    def est_payee(self):
+        return self.statut == self.STATUT_PAYE
     
     def get_delai(self):
         """Retourne le nombre de jours de retard (0 si pas de retard)"""

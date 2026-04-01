@@ -12,10 +12,12 @@
         <a href="{{ url_for('modifier_commande', id=commande.id) }}" class="btn btn-warning">
             <i class="bi bi-pencil"></i> Modifier
         </a>
-        <a href="{{ url_for('supprimer_commande', id=commande.id) }}" class="btn btn-danger" 
-           onclick="return confirm('Supprimer cette commande ?')">
-            <i class="bi bi-trash"></i> Supprimer
-        </a>
+        <form method="POST" action="{{ url_for('supprimer_commande', id=commande.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" onclick="return confirm('Supprimer cette commande ?')">
+                <i class="bi bi-trash"></i> Supprimer
+            </button>
+        </form>
         {% endif %}
         <a href="{{ url_for('commandes') }}" class="btn btn-secondary">
             <i class="bi bi-arrow-left"></i> Retour
@@ -119,7 +121,7 @@
                     
                     <dt class="col-sm-6">Statut</dt>
                     <dd class="col-sm-6 text-end">
-                        <span class="badge {% if commande.statut == 'PAYER' %}bg-success{% else %}bg-danger{% endif %} fs-6">
+                        <span class="badge {% if commande.est_payee() %}bg-success{% else %}bg-danger{% endif %} fs-6">
                             {{ commande.statut or '-' }}
                         </span>
                     </dd>

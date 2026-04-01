@@ -10,7 +10,8 @@
     <div class="btn-toolbar">
         {% if current_user.is_authenticated and current_user.role == 'admin' %}
         <form action="{{ url_for('importer_excel') }}" method="POST" enctype="multipart/form-data" class="d-inline me-2">
-            <input type="file" name="fichier" accept=".xlsx,.xls" class="d-none" id="importFile">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="file" name="fichier" accept=".xlsx,.xls,.csv" class="d-none" id="importFile">
             <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('importFile').click()">
                 <i class="bi bi-upload"></i> Importer
             </button>
@@ -41,7 +42,7 @@
             <label class="form-label small text-muted">Statut</label>
             <select name="statut" class="form-select">
                 <option value="">Tous</option>
-                <option value="PAYER" {% if filtres.statut == 'PAYER' %}selected{% endif %}>PAYER</option>
+                <option value="PAYÉ" {% if filtres.statut == 'PAYÉ' %}selected{% endif %}>PAYÉ</option>
                 <option value="A PAYER" {% if filtres.statut == 'A PAYER' %}selected{% endif %}>À PAYER</option>
             </select>
         </div>
@@ -55,8 +56,17 @@
             </select>
         </div>
         <div class="col-md-3">
+            <label class="form-label small text-muted">Fournisseur</label>
+            <select name="fournisseur" class="form-select">
+                <option value="">Tous</option>
+                {% for f in fournisseurs %}
+                <option value="{{ f.id }}" {% if filtres.fournisseur == (f.id|string) %}selected{% endif %}>{{ f.nom }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
             <label class="form-label small text-muted">Recherche</label>
-            <input type="text" name="recherche" class="form-control" placeholder="Affaire, demandeur..." value="{{ request.args.get('recherche', '') }}">
+            <input type="text" name="recherche" class="form-control" placeholder="Affaire, demandeur..." value="{{ filtres.recherche }}">
         </div>
         <div class="col-12">
             <button type="submit" class="btn btn-primary">
@@ -101,7 +111,7 @@
                         <td class="text-end">{{ "{:,.0f}".format(c.montant) }} FCFA</td>
                         <td class="text-end">{{ "{:,.0f}".format(c.solde) }} FCFA</td>
                         <td>
-                            <span class="badge {% if c.statut == 'PAYER' %}bg-success{% else %}bg-danger{% endif %}">
+                            <span class="badge {% if c.est_payee() %}bg-success{% else %}bg-danger{% endif %}">
                                 {{ c.statut or '-' }}
                             </span>
                         </td>
@@ -118,10 +128,12 @@
                                 <a href="{{ url_for('modifier_commande', id=c.id) }}" class="btn btn-outline-primary">
                                     <i class="bi bi-pencil"></i>
                                 </a>
-                                <a href="{{ url_for('supprimer_commande', id=c.id) }}" class="btn btn-outline-danger" 
-                                   onclick="return confirm('Supprimer cette commande ?')">
-                                    <i class="bi bi-trash"></i>
-                                </a>
+                                <form method="POST" action="{{ url_for('supprimer_commande', id=c.id) }}" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Supprimer cette commande ?')">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
                             </div>
                         </td>
                         {% endif %}

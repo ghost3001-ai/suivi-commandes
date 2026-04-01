@@ -17,6 +17,8 @@
             </div>
             <div class="card-body">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="update_profile">
                     <div class="mb-3">
                         <label class="form-label">Nom d'utilisateur</label>
                         <input type="text" class="form-control" value="{{ utilisateur.username }}" disabled>
@@ -61,6 +63,8 @@
             </div>
             <div class="card-body">
                 <form method="POST" id="passwordForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="change_password">
                     <div class="mb-3">
                         <label class="form-label">Ancien mot de passe</label>
                         <input type="password" name="ancien_password" class="form-control" required>

@@ -98,7 +98,7 @@
                         <td class="text-end">{{ "{:,.0f}".format(c.montant) }} FCFA</td>
                         <td class="text-end">{{ "{:,.0f}".format(c.solde) }} FCFA</td>
                         <td>
-                            <span class="badge {% if c.statut == 'PAYER' %}bg-success{% else %}bg-danger{% endif %}">
+                            <span class="badge {% if c.est_payee() %}bg-success{% else %}bg-danger{% endif %}">
                                 {{ c.statut }}
                             </span>
                         </td>

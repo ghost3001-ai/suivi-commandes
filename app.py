@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, session
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from flask_wtf.csrf import CSRFProtect
 from werkzeug.utils import secure_filename
 from datetime import datetime, date, timedelta
 import pandas as pd
@@ -9,7 +10,8 @@ import json
 
 from config import Config
 from models import db, Utilisateur, Fournisseur, Commande, LogAction
-from sqlalchemy import func, case, and_, or_
+from sqlalchemy import func, case, and_, or_, inspect, text
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 # Initialisation de l'application
 app = Flask(__name__)
@@ -21,6 +23,9 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Veuillez vous connecter pour accéder à cette page'
+
+# CSRF Protection
+csrf = CSRFProtect(app)
 
 # Création du dossier d'upload si nécessaire
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -42,6 +47,81 @@ def utility_processor():
         return f"{m:,.0f}" if m else "0"
     
     return dict(format_date=format_date, format_montant=format_montant)
+
+# ==================== VALIDATION FUNCTIONS ====================
+
+def valider_montant(montant_str):
+    """Valide et retourne un montant numérique"""
+    try:
+        montant = float(montant_str) if montant_str else 0
+        if montant < 0:
+            raise ValueError("Le montant ne peut pas être négatif")
+        return montant
+    except (ValueError, TypeError):
+        raise ValueError("Montant invalide")
+
+def valider_email(email):
+    """Valide un format d'email"""
+    if not email:
+        return True  # Email optionnel
+    import re
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(pattern, email):
+        raise ValueError("Format d'email invalide")
+    return True
+
+def valider_telephone(telephone):
+    """Valide un numéro de téléphone"""
+    if not telephone:
+        return True  # Téléphone optionnel
+    # Simple validation: au moins 9 caractères, et contient des chiffres
+    if len(str(telephone).replace(' ', '').replace('-', '')) < 9:
+        raise ValueError("Numéro de téléphone invalide")
+    return True
+
+def valider_mot_de_passe(password):
+    """Valide un mot de passe minimal."""
+    if not password or len(password) < 6:
+        raise ValueError("Le mot de passe doit contenir au moins 6 caractères")
+    return True
+
+def parser_date_import(value):
+    """Convertit une valeur importée en date Python valide."""
+    if value is None or value == '' or pd.isna(value):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+
+    parsed = pd.to_datetime(value, errors='coerce')
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
+def parser_montant_import(value):
+    """Nettoie les montants issus d'Excel/CSV."""
+    if value is None or value == '' or pd.isna(value):
+        return 0
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    cleaned = str(value).strip().replace(' ', '')
+    cleaned = cleaned.replace('\u202f', '').replace('\xa0', '')
+
+    if ',' in cleaned and '.' in cleaned:
+        cleaned = cleaned.replace('.', '').replace(',', '.')
+    elif ',' in cleaned:
+        cleaned = cleaned.replace(',', '.')
+
+    cleaned = ''.join(ch for ch in cleaned if ch.isdigit() or ch in '.-')
+    if not cleaned:
+        return 0
+
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0
 
 # ==================== ROUTES AUTHENTIFICATION ====================
 
@@ -74,7 +154,7 @@ def login():
     
     return render_template('login.html')
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 @login_required
 def logout():
     logout_user()
@@ -85,16 +165,23 @@ def logout():
 
 @app.route('/')
 @app.route('/dashboard')
+@login_required
 def dashboard():
     # KPI
     total_commandes = Commande.query.count()
     montant_total = db.session.query(db.func.sum(Commande.montant)).scalar() or 0
-    total_a_payer = db.session.query(db.func.sum(Commande.solde)).filter(Commande.statut == 'A PAYER').scalar() or 0
-    total_payer = db.session.query(db.func.sum(Commande.solde)).filter(Commande.statut == 'PAYER').scalar() or 0
+    total_a_payer = db.session.query(db.func.sum(Commande.solde)).filter(
+        Commande.statut == Commande.STATUT_A_PAYER
+    ).scalar() or 0
+    total_payer = db.session.query(db.func.sum(Commande.solde)).filter(
+        Commande.statut == Commande.STATUT_PAYE
+    ).scalar() or 0
     
-    # Commandes en retard
-    commandes = Commande.query.all()
-    nb_retard = sum(1 for c in commandes if c.est_en_retard())
+    # Commandes en retard (sans charger toutes les commandes en mémoire)
+    nb_retard = db.session.query(db.func.count(Commande.id)).filter(
+        Commande.date_livraison.isnot(None),
+        Commande.date_livraison < date.today()
+    ).scalar() or 0
     
     # Dernières commandes
     dernieres_commandes = Commande.query.order_by(Commande.date_cde.desc()).limit(10).all()
@@ -147,6 +234,7 @@ def dashboard():
 # ==================== ROUTES COMMANDES ====================
 
 @app.route('/commandes')
+@login_required
 def commandes():
     # Récupération des filtres
     entite = request.args.get('entite', '')
@@ -159,12 +247,12 @@ def commandes():
     
     if entite:
         query = query.filter(Commande.entite == entite)
-    if statut:
+    if statut in {Commande.STATUT_PAYE, Commande.STATUT_A_PAYER}:
         query = query.filter(Commande.statut == statut)
     if acheteur:
         query = query.filter(Commande.acheteur == acheteur)
-    if fournisseur:
-        query = query.filter(Commande.fournisseur_id == int(fournisseur) if fournisseur.isdigit() else None)
+    if fournisseur and fournisseur.isdigit():
+        query = query.filter(Commande.fournisseur_id == int(fournisseur))
     if recherche:
         query = query.filter(
             Commande.affaire.contains(recherche) | 
@@ -184,7 +272,13 @@ def commandes():
                          entites=[e[0] for e in entites if e[0]],
                          acheteurs=[a[0] for a in acheteurs if a[0]],
                          fournisseurs=fournisseurs,
-                         filtres={'entite': entite, 'statut': statut, 'acheteur': acheteur})
+                         filtres={
+                             'entite': entite,
+                             'statut': statut,
+                             'acheteur': acheteur,
+                             'fournisseur': fournisseur,
+                             'recherche': recherche,
+                         })
 
 @app.route('/commande/ajouter', methods=['GET', 'POST'])
 @login_required
@@ -197,6 +291,18 @@ def ajouter_commande():
     
     if request.method == 'POST':
         try:
+            # Validation des montants
+            montant = valider_montant(request.form.get('montant', 0))
+            avance = valider_montant(request.form.get('avance', 0))
+            
+            # Vérifier que avance <= montant
+            if avance > montant:
+                flash('L\'avance ne peut pas être supérieure au montant', 'danger')
+                return render_template('admin/commande_form.html', 
+                                     fournisseurs=fournisseurs, 
+                                     commande=None,
+                                     titre="Ajouter une commande")
+            
             commande = Commande(
                 nr=request.form.get('nr', 0),
                 date_cde=datetime.strptime(request.form['date_cde'], '%Y-%m-%d').date() if request.form.get('date_cde') else None,
@@ -210,8 +316,8 @@ def ajouter_commande():
                 date_livraison=datetime.strptime(request.form['date_livraison'], '%Y-%m-%d').date() if request.form.get('date_livraison') else None,
                 bon_livraison=request.form.get('bon_livraison'),
                 facture=request.form.get('facture'),
-                montant=float(request.form.get('montant', 0)),
-                avance=float(request.form.get('avance', 0)),
+                montant=montant,
+                avance=avance,
                 date_paiement=datetime.strptime(request.form['date_paiement'], '%Y-%m-%d').date() if request.form.get('date_paiement') else None,
                 commentaire=request.form.get('commentaire')
             )
@@ -255,6 +361,18 @@ def modifier_commande(id):
     
     if request.method == 'POST':
         try:
+            # Validation des montants
+            montant = valider_montant(request.form.get('montant', 0))
+            avance = valider_montant(request.form.get('avance', 0))
+            
+            # Vérifier que avance <= montant
+            if avance > montant:
+                flash('L\'avance ne peut pas être supérieure au montant', 'danger')
+                return render_template('admin/commande_form.html', 
+                                     commande=commande, 
+                                     fournisseurs=fournisseurs,
+                                     titre="Modifier la commande")
+            
             commande.nr = request.form.get('nr', 0)
             commande.date_cde = datetime.strptime(request.form['date_cde'], '%Y-%m-%d').date() if request.form.get('date_cde') else None
             commande.entite = request.form.get('entite')
@@ -267,8 +385,8 @@ def modifier_commande(id):
             commande.date_livraison = datetime.strptime(request.form['date_livraison'], '%Y-%m-%d').date() if request.form.get('date_livraison') else None
             commande.bon_livraison = request.form.get('bon_livraison')
             commande.facture = request.form.get('facture')
-            commande.montant = float(request.form.get('montant', 0))
-            commande.avance = float(request.form.get('avance', 0))
+            commande.montant = montant
+            commande.avance = avance
             commande.date_paiement = datetime.strptime(request.form['date_paiement'], '%Y-%m-%d').date() if request.form.get('date_paiement') else None
             commande.commentaire = request.form.get('commentaire')
             commande.calculer_solde()
@@ -299,7 +417,7 @@ def modifier_commande(id):
                          fournisseurs=fournisseurs,
                          titre="Modifier la commande")
 
-@app.route('/commande/supprimer/<int:id>')
+@app.route('/commande/supprimer/<int:id>', methods=['POST'])
 @login_required
 def supprimer_commande(id):
     if current_user.role != 'admin':
@@ -332,6 +450,7 @@ def supprimer_commande(id):
     return redirect(url_for('commandes'))
 
 @app.route('/commande/<int:id>')
+@login_required
 def voir_commande(id):
     commande = Commande.query.get_or_404(id)
     return render_template('commande_detail.html', commande=commande)
@@ -357,6 +476,11 @@ def ajouter_fournisseur():
     
     if request.method == 'POST':
         try:
+            valider_email(request.form.get('email1'))
+            valider_email(request.form.get('email2'))
+            valider_telephone(request.form.get('telephone1'))
+            valider_telephone(request.form.get('telephone2'))
+
             fournisseur = Fournisseur(
                 nom=request.form.get('nom'),
                 statut_juridique=request.form.get('statut_juridique'),
@@ -372,11 +496,22 @@ def ajouter_fournisseur():
             )
             db.session.add(fournisseur)
             db.session.commit()
+
+            log = LogAction(
+                utilisateur_id=current_user.id,
+                action='CREATE',
+                table='fournisseur',
+                record_id=fournisseur.id,
+                details=f'Ajout fournisseur {fournisseur.nom}',
+                ip_address=request.remote_addr
+            )
+            db.session.add(log)
+            db.session.commit()
             
             flash('Fournisseur ajouté avec succès', 'success')
             return redirect(url_for('fournisseurs'))
             
-        except Exception as e:
+        except (ValueError, IntegrityError) as e:
             db.session.rollback()
             flash(f'Erreur lors de l\'ajout: {str(e)}', 'danger')
     
@@ -393,6 +528,11 @@ def modifier_fournisseur(id):
     
     if request.method == 'POST':
         try:
+            valider_email(request.form.get('email1'))
+            valider_email(request.form.get('email2'))
+            valider_telephone(request.form.get('telephone1'))
+            valider_telephone(request.form.get('telephone2'))
+
             fournisseur.nom = request.form.get('nom')
             fournisseur.statut_juridique = request.form.get('statut_juridique')
             fournisseur.pays = request.form.get('pays')
@@ -406,17 +546,28 @@ def modifier_fournisseur(id):
             fournisseur.statut = request.form.get('statut')
             
             db.session.commit()
+
+            log = LogAction(
+                utilisateur_id=current_user.id,
+                action='UPDATE',
+                table='fournisseur',
+                record_id=fournisseur.id,
+                details=f'Modification fournisseur {fournisseur.nom}',
+                ip_address=request.remote_addr
+            )
+            db.session.add(log)
+            db.session.commit()
             
             flash('Fournisseur modifié avec succès', 'success')
             return redirect(url_for('fournisseurs'))
             
-        except Exception as e:
+        except (ValueError, IntegrityError) as e:
             db.session.rollback()
             flash(f'Erreur lors de la modification: {str(e)}', 'danger')
     
     return render_template('admin/fournisseur_form.html', fournisseur=fournisseur, titre="Modifier le fournisseur")
 
-@app.route('/fournisseur/supprimer/<int:id>')
+@app.route('/fournisseur/supprimer/<int:id>', methods=['POST'])
 @login_required
 def supprimer_fournisseur(id):
     if current_user.role != 'admin':
@@ -431,6 +582,17 @@ def supprimer_fournisseur(id):
         return redirect(url_for('fournisseurs'))
     
     try:
+        log = LogAction(
+            utilisateur_id=current_user.id,
+            action='DELETE',
+            table='fournisseur',
+            record_id=fournisseur.id,
+            details=f'Suppression fournisseur {fournisseur.nom}',
+            ip_address=request.remote_addr
+        )
+        db.session.add(log)
+        db.session.commit()
+
         db.session.delete(fournisseur)
         db.session.commit()
         flash('Fournisseur supprimé avec succès', 'success')
@@ -443,6 +605,7 @@ def supprimer_fournisseur(id):
 # ==================== ROUTES IMPORT/EXPORT ====================
 
 @app.route('/exporter/excel')
+@login_required
 def exporter_excel():
     commandes = Commande.query.all()
     
@@ -514,40 +677,113 @@ def importer_excel():
         flash('Aucun fichier sélectionné', 'danger')
         return redirect(url_for('commandes'))
     
+    # Vérifier l'extension du fichier
+    if not fichier.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
+        flash('Format de fichier non supporté. Utilisez Excel (.xlsx, .xls) ou CSV', 'danger')
+        return redirect(url_for('commandes'))
+    
     try:
-        df = pd.read_excel(fichier)
-        compteur = 0
+        extension = os.path.splitext(fichier.filename)[1].lower()
+
+        # Charger le fichier avec gestion d'erreurs
+        try:
+            if extension == '.csv':
+                df = pd.read_csv(fichier)
+            else:
+                df = pd.read_excel(fichier)
+        except Exception as e:
+            flash(f'Erreur lors de la lecture du fichier: {str(e)[:100]}', 'danger')
+            return redirect(url_for('commandes'))
         
-        for _, row in df.iterrows():
-            # Trouver ou créer le fournisseur
-            nom_fournisseur = row.get('Fournisseur', '')
-            fournisseur = None
-            if nom_fournisseur:
-                fournisseur = Fournisseur.query.filter_by(nom=nom_fournisseur).first()
-            
-            commande = Commande(
-                nr=row.get('Nr.', 0) if pd.notna(row.get('Nr.')) else None,
-                date_cde=row.get('Date CDE') if pd.notna(row.get('Date CDE')) else None,
-                entite=row.get('Entité') if pd.notna(row.get('Entité')) else None,
-                demandeur=row.get('Demandeur') if pd.notna(row.get('Demandeur')) else None,
-                service_demandeur=row.get('Service Demandeur') if pd.notna(row.get('Service Demandeur')) else None,
-                acheteur=row.get('Acheteur') if pd.notna(row.get('Acheteur')) else None,
-                fournisseur_id=fournisseur.id if fournisseur else None,
-                affaire=row.get('Affaire/Commande') if pd.notna(row.get('Affaire/Commande')) else None,
-                bon_commande=row.get('N° Bon commande') if pd.notna(row.get('N° Bon commande')) else None,
-                date_livraison=row.get('Date Livraison') if pd.notna(row.get('Date Livraison')) else None,
-                bon_livraison=row.get('N° Bon Livraison') if pd.notna(row.get('N° Bon Livraison')) else None,
-                facture=row.get('Facture') if pd.notna(row.get('Facture')) else None,
-                montant=float(row.get('Montant', 0)) if pd.notna(row.get('Montant')) else 0,
-                avance=float(row.get('Avance', 0)) if pd.notna(row.get('Avance')) else 0,
-                commentaire=row.get('Commentaire') if pd.notna(row.get('Commentaire')) else None
-            )
-            commande.calculer_solde()
-            db.session.add(commande)
-            compteur += 1
+        if df.empty:
+            flash('Le fichier est vide', 'danger')
+            return redirect(url_for('commandes'))
+        
+        # Vérifier les colonnes requises
+        colonnes_requises = ['Nr.', 'Date CDE', 'Montant']
+        colonnes_manquantes = [col for col in colonnes_requises if col not in df.columns]
+        if colonnes_manquantes:
+            flash(f'Colonnes manquantes: {", ".join(colonnes_manquantes)}', 'danger')
+            return redirect(url_for('commandes'))
+        
+        compteur = 0
+        erreurs = []
+        
+        for idx, row in df.iterrows():
+            try:
+                # Trouver ou créer le fournisseur
+                nom_fournisseur = row.get('Fournisseur', '')
+                fournisseur = None
+                if nom_fournisseur and pd.notna(nom_fournisseur):
+                    nom_fournisseur = str(nom_fournisseur).strip()
+                    fournisseur = Fournisseur.query.filter_by(nom=nom_fournisseur).first()
+                    if not fournisseur:
+                        fournisseur = Fournisseur(
+                            nom=nom_fournisseur,
+                            pays='Cameroun',
+                            statut='Actif'
+                        )
+                        db.session.add(fournisseur)
+                        db.session.flush()
+                
+                # Validation des montants
+                montant = parser_montant_import(row.get('Montant', 0))
+                avance = parser_montant_import(row.get('Avance', 0))
+                
+                if montant < 0 or avance < 0:
+                    erreurs.append(f'Ligne {idx+2}: Montants négatifs')
+                    continue
+                
+                if avance > montant:
+                    erreurs.append(f'Ligne {idx+2}: Avance > Montant')
+                    continue
+
+                bon_commande = str(row.get('N° Bon commande')).strip() if pd.notna(row.get('N° Bon commande')) else None
+                facture = str(row.get('Facture')).strip() if pd.notna(row.get('Facture')) else None
+                existe = None
+                if bon_commande:
+                    existe = Commande.query.filter_by(bon_commande=bon_commande).first()
+                if not existe and facture:
+                    existe = Commande.query.filter_by(facture=facture).first()
+                if existe:
+                    erreurs.append(f'Ligne {idx+2}: commande déjà existante')
+                    continue
+                
+                commande = Commande(
+                    nr=int(row.get('Nr.', 0)) if pd.notna(row.get('Nr.')) else None,
+                    date_cde=parser_date_import(row.get('Date CDE')),
+                    entite=str(row.get('Entité')).strip() if pd.notna(row.get('Entité')) else None,
+                    demandeur=str(row.get('Demandeur')).strip() if pd.notna(row.get('Demandeur')) else None,
+                    service_demandeur=str(row.get('Service Demandeur')).strip() if pd.notna(row.get('Service Demandeur')) else None,
+                    acheteur=str(row.get('Acheteur')).strip() if pd.notna(row.get('Acheteur')) else None,
+                    fournisseur_id=fournisseur.id if fournisseur else None,
+                    affaire=str(row.get('Affaire/Commande')).strip() if pd.notna(row.get('Affaire/Commande')) else None,
+                    bon_commande=bon_commande,
+                    date_livraison=parser_date_import(row.get('Date Livraison')),
+                    bon_livraison=str(row.get('N° Bon Livraison')).strip() if pd.notna(row.get('N° Bon Livraison')) else None,
+                    facture=facture,
+                    montant=montant,
+                    avance=avance,
+                    date_paiement=parser_date_import(row.get('Date Paiement')),
+                    commentaire=str(row.get('Commentaire')).strip() if pd.notna(row.get('Commentaire')) else None
+                )
+                commande.calculer_solde()
+                db.session.add(commande)
+                compteur += 1
+            except Exception as row_error:
+                erreurs.append(f'Ligne {idx+2}: {str(row_error)[:50]}')
+                continue
         
         db.session.commit()
-        flash(f'Import réussi: {compteur} commandes importées', 'success')
+        
+        # Message de succès avec détail des erreurs
+        if erreurs:
+            msg_erreurs = ' | '.join(erreurs[:5])  # Afficher max 5 erreurs
+            if len(erreurs) > 5:
+                msg_erreurs += f' (+{len(erreurs)-5} erreurs)'
+            flash(f'Import partiel: {compteur} commandes importées. Erreurs: {msg_erreurs}', 'warning')
+        else:
+            flash(f'Import réussi: {compteur} commandes importées', 'success')
         
     except Exception as e:
         db.session.rollback()
@@ -558,15 +794,19 @@ def importer_excel():
 # ==================== ROUTES API ====================
 
 @app.route('/api/commandes')
+@login_required
 def api_commandes():
     commandes = Commande.query.all()
     return jsonify([c.to_dict() for c in commandes])
 
 @app.route('/api/commandes/statistiques')
+@login_required
 def api_statistiques():
     total_commande = Commande.query.count()
     montant_total = db.session.query(db.func.sum(Commande.montant)).scalar() or 0
-    montant_a_payer = db.session.query(db.func.sum(Commande.solde)).filter(Commande.statut == 'A PAYER').scalar() or 0
+    montant_a_payer = db.session.query(db.func.sum(Commande.solde)).filter(
+        Commande.statut == Commande.STATUT_A_PAYER
+    ).scalar() or 0
     
     par_entite = []
     for e in db.session.query(Commande.entite, db.func.sum(Commande.montant)).group_by(Commande.entite).all():
@@ -580,6 +820,7 @@ def api_statistiques():
     })
 
 @app.route('/api/dashboard/kpi')
+@login_required
 def api_kpi():
     commandes = Commande.query.all()
     nb_retard = sum(1 for c in commandes if c.est_en_retard())
@@ -587,7 +828,9 @@ def api_kpi():
     return jsonify({
         'total_commandes': len(commandes),
         'nb_retard': nb_retard,
-        'montant_a_payer': db.session.query(db.func.sum(Commande.solde)).filter(Commande.statut == 'A PAYER').scalar() or 0,
+        'montant_a_payer': db.session.query(db.func.sum(Commande.solde)).filter(
+            Commande.statut == Commande.STATUT_A_PAYER
+        ).scalar() or 0,
         'date_actualisation': datetime.now().isoformat()
     })
 
@@ -603,47 +846,149 @@ def internal_server_error(e):
 
 # ==================== INITIALISATION ====================
 
+def migrate_legacy_sqlite_schema():
+    """Ajoute les colonnes manquantes sur une base SQLite existante."""
+    database_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not database_uri.startswith('sqlite'):
+        return
+
+    column_migrations = {
+        'fournisseurs': {
+            'statut_juridique': 'VARCHAR(100)',
+            'ville': 'VARCHAR(100)',
+            'dirigeant': 'VARCHAR(100)',
+            'telephone1': 'VARCHAR(50)',
+            'telephone2': 'VARCHAR(50)',
+            'email1': 'VARCHAR(100)',
+            'email2': 'VARCHAR(100)',
+            'categorie': 'VARCHAR(100)',
+            'created_at': 'DATETIME',
+        },
+        'commandes': {
+            'date_paiement': 'DATE',
+            'updated_at': 'DATETIME',
+        },
+    }
+
+    inspector = inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    with db.engine.begin() as connection:
+        for table_name, columns in column_migrations.items():
+            if table_name not in existing_tables:
+                continue
+
+            existing_columns = {column['name'] for column in inspector.get_columns(table_name)}
+            for column_name, column_type in columns.items():
+                if column_name in existing_columns:
+                    continue
+                try:
+                    connection.execute(
+                        text(f'ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}')
+                    )
+                    print(f"Colonne ajoutée: {table_name}.{column_name}")
+                except OperationalError as exc:
+                    if 'duplicate column name' not in str(exc).lower():
+                        raise
+
+        # Normalisation des données héritées pour éviter les crashs ORM.
+        connection.execute(text("""
+            UPDATE commandes
+            SET montant = COALESCE(montant, 0),
+                avance = COALESCE(avance, 0)
+        """))
+        connection.execute(text("""
+            UPDATE commandes
+            SET solde = COALESCE(montant, 0) - COALESCE(avance, 0)
+        """))
+        connection.execute(
+            text("""
+                UPDATE commandes
+                SET statut = CASE
+                    WHEN COALESCE(solde, 0) <= 0 THEN :statut_paye
+                    ELSE :statut_a_payer
+                END
+            """),
+            {
+                'statut_paye': Commande.STATUT_PAYE,
+                'statut_a_payer': Commande.STATUT_A_PAYER,
+            }
+        )
+        for column_name in ('date_cde', 'date_livraison', 'date_paiement'):
+            connection.execute(text(f"""
+                UPDATE commandes
+                SET {column_name} = NULL
+                WHERE {column_name} IS NOT NULL
+                  AND CAST({column_name} AS TEXT) NOT GLOB
+                    '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+            """))
+
 def init_db():
     """Initialise la base de données avec un utilisateur admin par défaut"""
     with app.app_context():
         db.create_all()
-        
-        # Créer l'utilisateur admin s'il n'existe pas
-        if not Utilisateur.query.filter_by(username='admin').first():
+        migrate_legacy_sqlite_schema()
+
+        is_production = os.environ.get('FLASK_ENV') == 'production'
+        admin_username = (os.environ.get('ADMIN_USERNAME') or 'admin').strip() or 'admin'
+        admin_email = (os.environ.get('ADMIN_EMAIL') or 'admin@example.com').strip() or 'admin@example.com'
+        admin_password = os.environ.get('ADMIN_PASSWORD')
+
+        if is_production and not admin_password and Utilisateur.query.filter_by(role='admin').count() == 0:
+            raise ValueError(
+                'ADMIN_PASSWORD environment variable MUST be set in production before first deploy'
+            )
+
+        if not admin_password:
+            admin_password = 'admin123'
+
+        # Créer un utilisateur admin s'il n'en existe aucun
+        if Utilisateur.query.filter_by(role='admin').count() == 0:
             admin = Utilisateur(
-                username='admin',
-                email='admin@example.com',
+                username=admin_username,
+                email=admin_email,
                 role='admin',
                 actif=True
             )
-            admin.set_password('admin123')
+            admin.set_password(admin_password)
             db.session.add(admin)
             db.session.commit()
-            print("Utilisateur admin créé: admin / admin123")
+            if is_production:
+                print(f"Utilisateur admin créé: {admin_username}")
+            else:
+                print(f"Utilisateur admin créé: {admin_username} / {admin_password}")
         
         # Créer quelques fournisseurs de test si la base est vide
-        if Fournisseur.query.count() == 0:
-            fournisseurs_test = [
-                Fournisseur(nom='ETS GREEN', pays='Cameroun', categorie='Transport'),
-                Fournisseur(nom='BAT ELEC', pays='Cameroun', categorie='Électrique'),
-                Fournisseur(nom='STE ICE', pays='Cameroun', categorie='Mobilier'),
-                Fournisseur(nom='DJIMY TECHNOLOGIE SERVICES', pays='Cameroun', categorie='Informatique'),
-                Fournisseur(nom='FOSHAN YOU YOU FURNITURE CO', pays='Chine', categorie='Mobilier'),
-            ]
-            for f in fournisseurs_test:
-                db.session.add(f)
+        fournisseurs_test = [
+            {'nom': 'ETS GREEN', 'pays': 'Cameroun', 'categorie': 'Transport'},
+            {'nom': 'BAT ELEC', 'pays': 'Cameroun', 'categorie': 'Électrique'},
+            {'nom': 'STE ICE', 'pays': 'Cameroun', 'categorie': 'Mobilier'},
+            {'nom': 'DJIMY TECHNOLOGIE SERVICES', 'pays': 'Cameroun', 'categorie': 'Informatique'},
+            {'nom': 'FOSHAN YOU YOU FURNITURE CO', 'pays': 'Chine', 'categorie': 'Mobilier'},
+        ]
+        created_count = 0
+        for fournisseur_data in fournisseurs_test:
+            exists = Fournisseur.query.filter_by(nom=fournisseur_data['nom']).first()
+            if exists:
+                continue
+            db.session.add(Fournisseur(**fournisseur_data))
+            created_count += 1
+
+        if created_count:
             db.session.commit()
             print("Fournisseurs de test créés")
 
 # ==================== ROUTES PERFORMANCES ====================
 
 @app.route('/performances')
+@login_required
 def performances():
     """Page principale des performances"""
     return render_template('performances/index.html')
 
 
 @app.route('/performances/acheteurs')
+@login_required
 def performances_acheteurs():
     """Performances par acheteur"""
     from sqlalchemy import func, case
@@ -657,27 +1002,31 @@ def performances_acheteurs():
         func.count(func.distinct(Commande.fournisseur_id)).label('nb_fournisseurs'),
         func.sum(
             case(
-                (Commande.statut == 'A PAYER', Commande.solde),
+                (Commande.statut == Commande.STATUT_A_PAYER, Commande.solde),
                 else_=0
             )
-        ).label('montant_a_payer')
+        ).label('montant_a_payer'),
+        func.count(
+            case(
+                (and_(Commande.date_livraison.isnot(None), Commande.date_livraison < date.today()), 1),
+                else_=None
+            )
+        ).label('nb_retard')
     ).group_by(Commande.acheteur).all()
     
-    # Calcul des délais et retards
-    commandes = Commande.query.all()
     acheteurs_data = []
     
     for stat in stats_acheteurs:
         if stat.acheteur:
-            commandes_acheteur = [c for c in commandes if c.acheteur == stat.acheteur]
+            # Calcul du délai moyen directement en Python (plus simple avec une requête distincte si nécessaire)
+            commandes_acheteur = Commande.query.filter_by(acheteur=stat.acheteur).all()
             
             # Calcul du délai moyen
             delais = [c.get_delai() for c in commandes_acheteur if c.date_livraison]
             delai_moyen = sum(delais) / len(delais) if delais else 0
             
             # Calcul du taux de retard
-            nb_retard = sum(1 for c in commandes_acheteur if c.est_en_retard())
-            taux_retard = (nb_retard / len(commandes_acheteur) * 100) if commandes_acheteur else 0
+            taux_retard = (stat.nb_retard / stat.total_commandes * 100) if stat.total_commandes > 0 else 0
             
             acheteurs_data.append({
                 'acheteur': stat.acheteur,
@@ -695,6 +1044,7 @@ def performances_acheteurs():
 
 
 @app.route('/performances/acheteur/<nom>')
+@login_required
 def performance_acheteur_detail(nom):
     """Détail des performances d'un acheteur"""
     from sqlalchemy import func
@@ -732,10 +1082,11 @@ def performance_acheteur_detail(nom):
                          top_fournisseurs=top_fournisseurs,
                          total_commandes=len(commandes),
                          total_montant=sum(c.montant for c in commandes),
-                         montant_a_payer=sum(c.solde for c in commandes if c.statut == 'A PAYER'))
+                         montant_a_payer=sum(c.solde for c in commandes if c.statut == Commande.STATUT_A_PAYER))
 
 
 @app.route('/performances/fournisseurs')
+@login_required
 def performances_fournisseurs():
     """Performances par fournisseur"""
     from sqlalchemy import func, case
@@ -749,26 +1100,30 @@ def performances_fournisseurs():
         func.sum(Commande.montant).label('total_montant'),
         func.sum(
             case(
-                (Commande.statut == 'A PAYER', Commande.solde),
+                (Commande.statut == Commande.STATUT_A_PAYER, Commande.solde),
                 else_=0
             )
-        ).label('montant_a_payer')
+        ).label('montant_a_payer'),
+        func.count(
+            case(
+                (and_(Commande.date_livraison.isnot(None), Commande.date_livraison < date.today()), 1),
+                else_=None
+            )
+        ).label('nb_retard')
     ).join(Commande, Fournisseur.id == Commande.fournisseur_id, isouter=True)\
      .group_by(Fournisseur.id).all()
     
-    commandes = Commande.query.all()
     fournisseurs_data = []
     
     for f in stats_fournisseurs:
-        commandes_fournisseur = [c for c in commandes if c.fournisseur_id == f.id]
+        commandes_fournisseur = Commande.query.filter_by(fournisseur_id=f.id).all() if f.total_commandes else []
         
         # Calcul du délai moyen
         delais = [c.get_delai() for c in commandes_fournisseur if c.date_livraison]
         delai_moyen = sum(delais) / len(delais) if delais else 0
         
         # Calcul du taux de retard
-        nb_retard = sum(1 for c in commandes_fournisseur if c.est_en_retard())
-        taux_retard = (nb_retard / len(commandes_fournisseur) * 100) if commandes_fournisseur else 0
+        taux_retard = (f.nb_retard / f.total_commandes * 100) if f.total_commandes > 0 else 0
         
         fournisseurs_data.append({
             'id': f.id,
@@ -785,6 +1140,7 @@ def performances_fournisseurs():
                          stats=fournisseurs_data)
 
 @app.route('/performances/fournisseur/<int:id>')
+@login_required
 def performance_fournisseur_detail(id):
     """Détail des performances d'un fournisseur"""
     fournisseur = Fournisseur.query.get_or_404(id)
@@ -812,10 +1168,11 @@ def performance_fournisseur_detail(id):
                          evolution=evolution,
                          total_commandes=len(commandes),
                          total_montant=sum(c.montant for c in commandes),
-                         montant_a_payer=sum(c.solde for c in commandes if c.statut == 'A PAYER'))
+                         montant_a_payer=sum(c.solde for c in commandes if c.statut == Commande.STATUT_A_PAYER))
 
 
 @app.route('/performances/produits')
+@login_required
 def performances_produits():
     """Performances par produit"""
     from sqlalchemy import func
@@ -850,6 +1207,7 @@ def performances_produits():
                          total_montant=total_general)
 
 @app.route('/api/performances/global')
+@login_required
 def api_performances_global():
     """API pour les performances globales"""
     from sqlalchemy import func
@@ -917,51 +1275,62 @@ def admin_utilisateur_ajouter():
         return redirect(url_for('dashboard'))
     
     if request.method == 'POST':
-        username = request.form.get('username')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        role = request.form.get('role')
-        nom_complet = request.form.get('nom_complet')
-        telephone = request.form.get('telephone')
+        try:
+            username = request.form.get('username')
+            email = request.form.get('email')
+            password = request.form.get('password')
+            role = request.form.get('role')
+            nom_complet = request.form.get('nom_complet')
+            telephone = request.form.get('telephone')
+            
+            # Validations
+            valider_email(email)
+            valider_telephone(telephone)
+            valider_mot_de_passe(password)
+            
+            # Vérifier si l'utilisateur existe déjà
+            if Utilisateur.query.filter_by(username=username).first():
+                flash('Ce nom d\'utilisateur existe déjà', 'danger')
+                return redirect(url_for('admin_utilisateur_ajouter'))
+            
+            if Utilisateur.query.filter_by(email=email).first():
+                flash('Cet email existe déjà', 'danger')
+                return redirect(url_for('admin_utilisateur_ajouter'))
+            
+            # Créer l'utilisateur
+            utilisateur = Utilisateur(
+                username=username,
+                email=email,
+                role=role,
+                nom_complet=nom_complet,
+                telephone=telephone,
+                created_by=current_user.id,
+                actif=True
+            )
+            utilisateur.set_password(password)
+            
+            db.session.add(utilisateur)
+            db.session.commit()
+            
+            # Log
+            log = LogAction(
+                utilisateur_id=current_user.id,
+                action='CREATE',
+                table='utilisateur',
+                record_id=utilisateur.id,
+                details=f'Ajout utilisateur {username}',
+                ip_address=request.remote_addr
+            )
+            db.session.add(log)
+            db.session.commit()
+            
+            flash(f'Utilisateur {username} créé avec succès', 'success')
+            return redirect(url_for('admin_utilisateurs'))
         
-        # Vérifier si l'utilisateur existe déjà
-        if Utilisateur.query.filter_by(username=username).first():
-            flash('Ce nom d\'utilisateur existe déjà', 'danger')
+        except (ValueError, IntegrityError) as e:
+            db.session.rollback()
+            flash(f'Erreur: {str(e)}', 'danger')
             return redirect(url_for('admin_utilisateur_ajouter'))
-        
-        if Utilisateur.query.filter_by(email=email).first():
-            flash('Cet email existe déjà', 'danger')
-            return redirect(url_for('admin_utilisateur_ajouter'))
-        
-        # Créer l'utilisateur
-        utilisateur = Utilisateur(
-            username=username,
-            email=email,
-            role=role,
-            nom_complet=nom_complet,
-            telephone=telephone,
-            created_by=current_user.id,
-            actif=True
-        )
-        utilisateur.set_password(password)
-        
-        db.session.add(utilisateur)
-        db.session.commit()
-        
-        # Log
-        log = LogAction(
-            utilisateur_id=current_user.id,
-            action='CREATE',
-            table='utilisateur',
-            record_id=utilisateur.id,
-            details=f'Ajout utilisateur {username}',
-            ip_address=request.remote_addr
-        )
-        db.session.add(log)
-        db.session.commit()
-        
-        flash(f'Utilisateur {username} créé avec succès', 'success')
-        return redirect(url_for('admin_utilisateurs'))
     
     return render_template('admin/utilisateur_form.html', 
                          utilisateur=None, 
@@ -978,49 +1347,79 @@ def admin_utilisateur_modifier(id):
     
     utilisateur = Utilisateur.query.get_or_404(id)
     
-    # Empêcher la modification de son propre rôle si c'est le seul admin
-    if utilisateur.id == current_user.id and current_user.role == 'admin':
-        admins = Utilisateur.query.filter_by(role='admin').count()
-        if admins == 1 and request.form.get('role') != 'admin':
-            flash('Vous ne pouvez pas retirer votre propre rôle admin car vous êtes le seul administrateur', 'danger')
-            return redirect(url_for('admin_utilisateurs'))
-    
     if request.method == 'POST':
-        utilisateur.username = request.form.get('username')
-        utilisateur.email = request.form.get('email')
-        utilisateur.role = request.form.get('role')
-        utilisateur.nom_complet = request.form.get('nom_complet')
-        utilisateur.telephone = request.form.get('telephone')
-        utilisateur.actif = 'actif' in request.form
-        
-        # Changer le mot de passe si fourni
-        nouveau_password = request.form.get('new_password')
-        if nouveau_password:
-            utilisateur.set_password(nouveau_password)
-        
-        db.session.commit()
-        
-        # Log
-        log = LogAction(
-            utilisateur_id=current_user.id,
-            action='UPDATE',
-            table='utilisateur',
-            record_id=utilisateur.id,
-            details=f'Modification utilisateur {utilisateur.username}',
-            ip_address=request.remote_addr
-        )
-        db.session.add(log)
-        db.session.commit()
-        
-        flash(f'Utilisateur {utilisateur.username} modifié avec succès', 'success')
-        return redirect(url_for('admin_utilisateurs'))
+        try:
+            username = request.form.get('username')
+            email = request.form.get('email')
+            role = request.form.get('role')
+            nom_complet = request.form.get('nom_complet')
+            telephone = request.form.get('telephone')
+            actif = 'actif' in request.form
+            nouveau_password = request.form.get('new_password')
+            confirmer_password = request.form.get('confirm_password')
+
+            valider_email(email)
+            valider_telephone(telephone)
+
+            username_exists = Utilisateur.query.filter(
+                Utilisateur.username == username,
+                Utilisateur.id != utilisateur.id
+            ).first()
+            if username_exists:
+                raise ValueError("Ce nom d'utilisateur existe déjà")
+
+            email_exists = Utilisateur.query.filter(
+                Utilisateur.email == email,
+                Utilisateur.id != utilisateur.id
+            ).first()
+            if email_exists:
+                raise ValueError("Cet email existe déjà")
+
+            if utilisateur.id == current_user.id and current_user.role == 'admin':
+                admins = Utilisateur.query.filter_by(role='admin').count()
+                if admins == 1 and role != 'admin':
+                    raise ValueError("Vous ne pouvez pas retirer votre propre rôle admin car vous êtes le seul administrateur")
+                if admins == 1 and not actif:
+                    raise ValueError("Vous ne pouvez pas désactiver le seul administrateur")
+
+            utilisateur.username = username
+            utilisateur.email = email
+            utilisateur.role = role
+            utilisateur.nom_complet = nom_complet
+            utilisateur.telephone = telephone
+            utilisateur.actif = actif
+
+            if nouveau_password:
+                valider_mot_de_passe(nouveau_password)
+                if nouveau_password != confirmer_password:
+                    raise ValueError("Les mots de passe ne correspondent pas")
+                utilisateur.set_password(nouveau_password)
+
+            db.session.commit()
+
+            log = LogAction(
+                utilisateur_id=current_user.id,
+                action='UPDATE',
+                table='utilisateur',
+                record_id=utilisateur.id,
+                details=f'Modification utilisateur {utilisateur.username}',
+                ip_address=request.remote_addr
+            )
+            db.session.add(log)
+            db.session.commit()
+
+            flash(f'Utilisateur {utilisateur.username} modifié avec succès', 'success')
+            return redirect(url_for('admin_utilisateurs'))
+        except (ValueError, IntegrityError) as e:
+            db.session.rollback()
+            flash(f'Erreur: {str(e)}', 'danger')
     
     return render_template('admin/utilisateur_form.html', 
                          utilisateur=utilisateur, 
                          titre="Modifier l'utilisateur")
 
 
-@app.route('/admin/utilisateur/supprimer/<int:id>')
+@app.route('/admin/utilisateur/supprimer/<int:id>', methods=['POST'])
 @login_required
 def admin_utilisateur_supprimer(id):
     """Supprimer un utilisateur (admin uniquement)"""
@@ -1068,30 +1467,78 @@ def admin_profil():
     utilisateur = current_user
     
     if request.method == 'POST':
-        utilisateur.email = request.form.get('email')
-        utilisateur.nom_complet = request.form.get('nom_complet')
-        utilisateur.telephone = request.form.get('telephone')
-        
-        # Changer le mot de passe si fourni
-        ancien_password = request.form.get('ancien_password')
-        nouveau_password = request.form.get('nouveau_password')
-        confirmer_password = request.form.get('confirmer_password')
-        
-        if ancien_password and nouveau_password:
-            if not utilisateur.check_password(ancien_password):
-                flash('Ancien mot de passe incorrect', 'danger')
-                return redirect(url_for('admin_profil'))
-            
-            if nouveau_password != confirmer_password:
-                flash('Les nouveaux mots de passe ne correspondent pas', 'danger')
-                return redirect(url_for('admin_profil'))
-            
-            utilisateur.set_password(nouveau_password)
-            flash('Mot de passe modifié avec succès', 'success')
-        
-        db.session.commit()
-        flash('Profil mis à jour avec succès', 'success')
-        return redirect(url_for('admin_profil'))
+        action = request.form.get('action')
+
+        try:
+            if action == 'update_profile':
+                email = request.form.get('email')
+                nom_complet = request.form.get('nom_complet')
+                telephone = request.form.get('telephone')
+
+                valider_email(email)
+                valider_telephone(telephone)
+
+                email_exists = Utilisateur.query.filter(
+                    Utilisateur.email == email,
+                    Utilisateur.id != utilisateur.id
+                ).first()
+                if email_exists:
+                    raise ValueError("Cet email existe déjà")
+
+                utilisateur.email = email
+                utilisateur.nom_complet = nom_complet
+                utilisateur.telephone = telephone
+                db.session.commit()
+
+                log = LogAction(
+                    utilisateur_id=current_user.id,
+                    action='UPDATE',
+                    table='profil',
+                    record_id=utilisateur.id,
+                    details='Mise à jour du profil',
+                    ip_address=request.remote_addr
+                )
+                db.session.add(log)
+                db.session.commit()
+
+                flash('Profil mis à jour avec succès', 'success')
+
+            elif action == 'change_password':
+                ancien_password = request.form.get('ancien_password')
+                nouveau_password = request.form.get('nouveau_password')
+                confirmer_password = request.form.get('confirmer_password')
+
+                if not ancien_password or not nouveau_password or not confirmer_password:
+                    raise ValueError('Tous les champs mot de passe sont obligatoires')
+                if not utilisateur.check_password(ancien_password):
+                    raise ValueError('Ancien mot de passe incorrect')
+                if nouveau_password != confirmer_password:
+                    raise ValueError('Les nouveaux mots de passe ne correspondent pas')
+
+                valider_mot_de_passe(nouveau_password)
+                utilisateur.set_password(nouveau_password)
+                db.session.commit()
+
+                log = LogAction(
+                    utilisateur_id=current_user.id,
+                    action='UPDATE',
+                    table='profil',
+                    record_id=utilisateur.id,
+                    details='Changement de mot de passe',
+                    ip_address=request.remote_addr
+                )
+                db.session.add(log)
+                db.session.commit()
+
+                flash('Mot de passe modifié avec succès', 'success')
+            else:
+                raise ValueError("Action de formulaire inconnue")
+
+            return redirect(url_for('admin_profil'))
+        except (ValueError, IntegrityError) as e:
+            db.session.rollback()
+            flash(f'Erreur: {str(e)}', 'danger')
+            return redirect(url_for('admin_profil'))
     
     return render_template('admin/profil.html', utilisateur=utilisateur)
 
@@ -1135,16 +1582,3 @@ def admin_logs():
 if __name__ == '__main__':
     init_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
-# Ajouter cette fonction pour la base de données
-import os
-
-def get_database_url():
-    """Retourne l'URL de la base de données selon l'environnement"""
-    database_url = os.environ.get('DATABASE_URL')
-    if database_url and database_url.startswith('postgres://'):
-        # Render utilise postgres://, SQLAlchemy a besoin de postgresql://
-        database_url = database_url.replace('postgres://', 'postgresql://', 1)
-    return database_url or 'sqlite:///instance/commandes.db'
-
-# Modifier la configuration de la base de données
-app.config['SQLALCHEMY_DATABASE_URI'] = get_database_url()
