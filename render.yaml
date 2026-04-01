@@ -3,6 +3,8 @@ services:
     name: suivi-commandes
     runtime: python
     branch: main
+    plan: free
+    region: frankfurt
     buildCommand: pip install -r requirements.txt
     preDeployCommand: python init_app.py
     startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --worker-class sync --access-logfile - --error-logfile -
@@ -21,3 +23,5 @@ services:
 
 databases:
   - name: suivi-commandes-db
+    plan: free
+    region: frankfurt
