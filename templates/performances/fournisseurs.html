@@ -7,10 +7,141 @@
     <h1 class="h2">
         <i class="bi bi-truck"></i> Performance par Fournisseur
     </h1>
-    <div class="btn-toolbar">
+    <div class="btn-toolbar gap-2">
+        <a href="{{ url_for('performances_fournisseurs_export_excel') }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="btn btn-success">
+            <i class="bi bi-file-excel"></i> Excel
+        </a>
+        <a href="{{ url_for('performances_fournisseurs_export_pdf') }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="btn btn-outline-danger">
+            <i class="bi bi-filetype-pdf"></i> PDF
+        </a>
         <button onclick="window.print()" class="btn btn-outline-secondary">
             <i class="bi bi-printer"></i> Imprimer
         </button>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-funnel"></i> Filtres fournisseurs</h5>
+    </div>
+    <div class="card-body">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-lg-2 col-md-4">
+                <label class="form-label small text-muted">Période</label>
+                <select name="period" class="form-select">
+                    <option value="today" {% if filtres.period == 'today' %}selected{% endif %}>Aujourd'hui</option>
+                    <option value="week" {% if filtres.period == 'week' %}selected{% endif %}>Cette semaine</option>
+                    <option value="month" {% if filtres.period == 'month' %}selected{% endif %}>Ce mois</option>
+                    <option value="year" {% if filtres.period == 'year' %}selected{% endif %}>Cette année</option>
+                    <option value="custom" {% if filtres.period == 'custom' %}selected{% endif %}>Personnalisée</option>
+                    <option value="all" {% if filtres.period == 'all' %}selected{% endif %}>Tout</option>
+                </select>
+            </div>
+            <div class="col-lg-2 col-md-4">
+                <label class="form-label small text-muted">Début</label>
+                <input type="date" name="start_date" class="form-control" value="{{ filtres.start_date.isoformat() if filtres.start_date else '' }}">
+            </div>
+            <div class="col-lg-2 col-md-4">
+                <label class="form-label small text-muted">Fin</label>
+                <input type="date" name="end_date" class="form-control" value="{{ filtres.end_date.isoformat() if filtres.end_date else '' }}">
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="form-check mt-md-4 pt-md-2">
+                    <input class="form-check-input" type="checkbox" name="include_inactive" value="1" id="includeInactiveSuppliers" {% if filtres.include_inactive %}checked{% endif %}>
+                    <label class="form-check-label" for="includeInactiveSuppliers">
+                        Inclure les fournisseurs sans activité
+                    </label>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6 d-flex gap-2">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-search"></i> Filtrer
+                </button>
+                <a href="{{ url_for('performances_fournisseurs') }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-counterclockwise"></i> Réinitialiser
+                </a>
+            </div>
+        </form>
+        <div class="small text-muted mt-3">
+            Vue active: <strong>{{ period_label }}</strong>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Fournisseurs suivis</small>
+                <h3 class="mt-2 mb-0">{{ summary.total_fournisseurs }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Excellents</small>
+                <h3 class="mt-2 mb-0 text-success">{{ summary.fournisseurs_excellents }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Score moyen</small>
+                <h3 class="mt-2 mb-0">{{ "{:,.2f}".format(summary.score_moyen or 0) }}/5</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Conformité</small>
+                <h3 class="mt-2 mb-0">{{ "{:,.1f}".format(summary.conformite_moyenne or 0) }}%</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Rupture</small>
+                <h3 class="mt-2 mb-0">{{ "{:,.1f}".format(summary.rupture_moyenne or 0) }}%</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Délai moyen</small>
+                <h3 class="mt-2 mb-0">{{ "{:,.1f}".format(summary.delai_moyen_general or 0) }} j</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-grid-3x3-gap"></i> Matrice de performance</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartSupplierMatrix" height="280"></canvas>
+                <div class="small text-muted mt-3">
+                    Axe X: délai moyen réel en jours. Axe Y: score de performance moyen sur 5.
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-graph-up-arrow"></i> Évolution des performances</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartSupplierEvolution" height="280"></canvas>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -21,13 +152,15 @@
                 <thead class="table-light">
                     <tr>
                         <th>Fournisseur</th>
-                        <th>Pays</th>
                         <th>Commandes</th>
-                        <th>Montant total</th>
-                        <th>À payer</th>
-                        <th>Délai moyen</th>
-                        <th>Taux retard</th>
-                        <th>Note</th>
+                        <th class="text-end">Montant</th>
+                        <th class="text-end">Score</th>
+                        <th class="text-end">Délai</th>
+                        <th class="text-end">Conformité</th>
+                        <th class="text-end">Rupture</th>
+                        <th class="text-end">Prix vs marché</th>
+                        <th class="text-end">Fiabilité</th>
+                        <th>Quadrant</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -36,44 +169,74 @@
                     <tr>
                         <td>
                             <strong>{{ s.nom }}</strong>
-                            {% if s.total_montant > 50000000 %}
-                            <span class="badge bg-warning ms-2">Stratégique</span>
-                            {% endif %}
+                            <br><small class="text-muted">{{ s.pays or '-' }}</small>
                         </td>
-                        <td>{{ s.pays or '-' }}</td>
                         <td>{{ s.total_commandes }}</td>
                         <td class="text-end">{{ "{:,.0f}".format(s.total_montant) }} FCFA</td>
-                        <td class="text-end text-danger">{{ "{:,.0f}".format(s.montant_a_payer) }} FCFA</td>
-                        <td>
-                            {% if s.delai_moyen > 0 %}
-                            <span class="badge badge-retard">{{ s.delai_moyen }}j</span>
+                        <td class="text-end">
+                            {% if s.score_performance is not none %}
+                            <span class="badge {% if s.score_performance > 4 %}bg-success{% elif s.score_performance >= 3 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                {{ "{:,.2f}".format(s.score_performance) }}/5
+                            </span>
                             {% else %}
-                            <span class="text-muted">{{ s.delai_moyen }}j</span>
+                            <span class="badge bg-secondary">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            {% if s.delai_moyen is not none %}
+                            <span class="{% if s.delai_moyen < 10 %}text-success{% elif s.delai_moyen < 20 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ "{:,.1f}".format(s.delai_moyen) }} j
+                            </span>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <span class="{% if s.taux_conformite > 95 %}text-success{% elif s.taux_conformite >= 85 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ "{:,.1f}".format(s.taux_conformite) }}%
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            <span class="{% if s.taux_rupture < 5 %}text-success{% elif s.taux_rupture < 10 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ "{:,.1f}".format(s.taux_rupture) }}%
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            {% if s.price_competitiveness_pct is not none %}
+                            <span class="{% if s.price_competitiveness_pct <= 0 %}text-success{% elif s.price_competitiveness_pct <= 10 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ "{:+.1f}".format(s.price_competitiveness_pct) }}%
+                            </span>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <span class="badge {% if s.score_fiabilite >= 80 %}bg-success{% elif s.score_fiabilite >= 60 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                {{ "{:,.1f}".format(s.score_fiabilite) }}/100
+                            </span>
+                        </td>
+                        <td>
+                            {% if s.quadrant == 'EXCELLENT' %}
+                            <span class="badge bg-success">Excellents</span>
+                            {% elif s.quadrant == 'A_SURVEILLER' %}
+                            <span class="badge bg-warning text-dark">À surveiller</span>
+                            {% elif s.quadrant == 'A_FIDELISER' %}
+                            <span class="badge bg-info text-dark">À fidéliser</span>
+                            {% elif s.quadrant == 'A_REMPLACER' %}
+                            <span class="badge bg-danger">À remplacer</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Non noté</span>
                             {% endif %}
                         </td>
                         <td>
-                            {% if s.taux_retard > 20 %}
-                            <span class="badge bg-danger">{{ s.taux_retard }}%</span>
-                            {% elif s.taux_retard > 0 %}
-                            <span class="badge bg-warning">{{ s.taux_retard }}%</span>
-                            {% else %}
-                            <span class="badge bg-success">0%</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if s.delai_moyen <= 5 and s.taux_retard == 0 %}
-                            <span class="badge bg-success">⭐ Fiable</span>
-                            {% elif s.delai_moyen > 30 %}
-                            <span class="badge bg-danger">⚠️ Critique</span>
-                            {% else %}
-                            <span class="badge bg-secondary">Normal</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <a href="{{ url_for('performance_fournisseur_detail', id=s.id) }}" class="btn btn-sm btn-outline-primary">
+                            <a href="{{ url_for('performance_fournisseur_detail', id=s.id) }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="btn btn-sm btn-outline-primary">
                                 <i class="bi bi-eye"></i> Détail
                             </a>
                         </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="11" class="text-center py-4 text-muted">Aucune donnée fournisseur</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -81,4 +244,107 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const supplierMatrixPoints = {{ matrix_points | tojson }};
+const supplierEvolutionLabels = {{ evolution_labels | tojson }};
+const supplierEvolutionDatasets = {{ evolution_datasets | tojson }};
+const matrixDelayThreshold = {{ matrix_delay_threshold | tojson }};
+const matrixScoreThreshold = {{ matrix_score_threshold | tojson }};
+const supplierPalette = ['#2c3e6d', '#198754', '#ffc107', '#dc3545', '#0dcaf0'];
+
+const matrixGuidePlugin = {
+    id: 'matrixGuidePlugin',
+    afterDraw(chart) {
+        const {ctx, scales: {x, y}} = chart;
+        if (!x || !y) return;
+        ctx.save();
+        ctx.strokeStyle = '#adb5bd';
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(x.getPixelForValue(matrixDelayThreshold), y.top);
+        ctx.lineTo(x.getPixelForValue(matrixDelayThreshold), y.bottom);
+        ctx.moveTo(x.left, y.getPixelForValue(matrixScoreThreshold));
+        ctx.lineTo(x.right, y.getPixelForValue(matrixScoreThreshold));
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#6c757d';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('Excellents', x.left + 12, y.top + 18);
+        ctx.fillText('À surveiller', x.getPixelForValue(matrixDelayThreshold) + 12, y.top + 18);
+        ctx.fillText('À fidéliser', x.left + 12, y.bottom - 12);
+        ctx.fillText('À remplacer', x.getPixelForValue(matrixDelayThreshold) + 12, y.bottom - 12);
+        ctx.restore();
+    }
+};
+
+new Chart(document.getElementById('chartSupplierMatrix').getContext('2d'), {
+    type: 'scatter',
+    data: {
+        datasets: [{
+            label: 'Fournisseurs',
+            data: supplierMatrixPoints,
+            backgroundColor: supplierMatrixPoints.map(point => {
+                if (point.quadrant === 'EXCELLENT') return '#198754';
+                if (point.quadrant === 'A_SURVEILLER') return '#ffc107';
+                if (point.quadrant === 'A_FIDELISER') return '#0dcaf0';
+                return '#dc3545';
+            }),
+            pointRadius: 7,
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: {
+                title: {display: true, text: 'Délai moyen (jours)'},
+                beginAtZero: true,
+            },
+            y: {
+                title: {display: true, text: 'Score performance /5'},
+                min: 0,
+                max: 5,
+            }
+        },
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: context => `${context.raw.label}: ${context.raw.y}/5, ${context.raw.x}j`
+                }
+            }
+        }
+    },
+    plugins: [matrixGuidePlugin],
+});
+
+new Chart(document.getElementById('chartSupplierEvolution').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: supplierEvolutionLabels,
+        datasets: supplierEvolutionDatasets.map((dataset, index) => ({
+            label: dataset.label,
+            data: dataset.scores,
+            borderColor: supplierPalette[index % supplierPalette.length],
+            backgroundColor: supplierPalette[index % supplierPalette.length],
+            tension: 0.3,
+            spanGaps: true,
+        }))
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                min: 0,
+                max: 5,
+                ticks: {stepSize: 1},
+                title: {display: true, text: 'Score moyen /5'}
+            }
+        }
+    }
+});
+</script>
 {% endblock %}

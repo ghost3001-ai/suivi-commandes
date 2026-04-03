@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Stocks{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-boxes"></i> Gestion des stocks
+    </h1>
+    <div class="btn-toolbar">
+        <a href="{{ url_for('mouvements_stock') }}" class="btn btn-outline-secondary me-2">
+            <i class="bi bi-arrow-left-right"></i> Mouvements
+        </a>
+        {% if can('stocks_manage') %}
+        <a href="{{ url_for('ajouter_mouvement_stock') }}" class="btn btn-outline-primary me-2">
+            <i class="bi bi-plus-circle"></i> Mouvement
+        </a>
+        <a href="{{ url_for('importer_stock_excel') }}" class="btn btn-outline-primary me-2">
+            <i class="bi bi-file-earmark-spreadsheet"></i> Import stock
+        </a>
+        <a href="{{ url_for('ajouter_produit') }}" class="btn btn-primary">
+            <i class="bi bi-box-seam"></i> Nouveau produit
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card card-stats stat-bleu">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Produits actifs</small>
+                <h2 class="mb-0 mt-1">{{ total_produits }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card card-stats stat-vert">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Valeur du stock</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(valeur_stock) }} FCFA</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card card-stats stat-orange">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Stock faible</small>
+                <h2 class="mb-0 mt-1">{{ nb_stock_faible }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="filters-bar">
+    <form method="GET" class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Recherche</label>
+            <input type="text" name="recherche" class="form-control" value="{{ filtres.recherche }}" placeholder="Nom, code, description">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Famille</label>
+            <select name="famille" class="form-select">
+                <option value="">Toutes</option>
+                {% for famille in familles %}
+                <option value="{{ famille }}" {% if filtres.famille == famille %}selected{% endif %}>{{ famille }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Catégorie</label>
+            <select name="categorie" class="form-select">
+                <option value="">Toutes</option>
+                {% for categorie in categories %}
+                <option value="{{ categorie }}" {% if filtres.categorie == categorie %}selected{% endif %}>{{ categorie }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted">État</label>
+            <select name="etat" class="form-select">
+                <option value="">Tous</option>
+                <option value="actif" {% if filtres.etat == 'actif' %}selected{% endif %}>Actifs</option>
+                <option value="faible" {% if filtres.etat == 'faible' %}selected{% endif %}>Stock faible</option>
+                <option value="rupture" {% if filtres.etat == 'rupture' %}selected{% endif %}>Rupture</option>
+                <option value="inactif" {% if filtres.etat == 'inactif' %}selected{% endif %}>Inactifs</option>
+            </select>
+        </div>
+        <div class="col-12 d-flex justify-content-end">
+            <div class="mt-2">
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="bi bi-funnel"></i> Filtrer
+                </button>
+                <a href="{{ url_for('stocks') }}" class="btn btn-secondary">Reset</a>
+            </div>
+        </div>
+    </form>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-box-seam"></i> Catalogue produits</h5>
+        <span class="text-muted small">{{ pagination.total if pagination else produits|length }} résultat(s)</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Produit</th>
+                        <th>Famille / Catégorie</th>
+                        <th class="text-end">Prix unitaire</th>
+                        <th class="text-end">Stock</th>
+                        <th class="text-end">Seuil</th>
+                        <th class="text-end">Valeur</th>
+                        <th>État</th>
+                        {% if can('stocks_manage') %}
+                        <th>Actions</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for produit in produits %}
+                    <tr>
+                        <td>
+                            <strong>{{ produit.nom }}</strong>
+                            {% if produit.code %}<br><small class="text-muted">{{ produit.code }}</small>{% endif %}
+                        </td>
+                        <td>
+                            {{ produit.famille or '-' }}
+                            {% if produit.categorie %}
+                            <br><small class="text-muted">{{ produit.categorie }}</small>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">{{ "{:,.0f}".format(produit.prix_unitaire or 0) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.2f}".format(produit.stock_actuel or 0) }} {{ produit.unite or '' }}</td>
+                        <td class="text-end">{{ "{:,.2f}".format(produit.stock_minimum or 0) }}</td>
+                        <td class="text-end">{{ "{:,.0f}".format(produit.valeur_stock) }} FCFA</td>
+                        <td>
+                            {% if not produit.actif %}
+                            <span class="badge bg-secondary">Inactif</span>
+                            {% elif produit.stock_actuel <= 0 %}
+                            <span class="badge bg-danger">Rupture</span>
+                            {% elif produit.est_stock_faible() %}
+                            <span class="badge bg-warning text-dark">Stock faible</span>
+                            {% else %}
+                            <span class="badge bg-success">Disponible</span>
+                            {% endif %}
+                        </td>
+                        {% if can('stocks_manage') %}
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <a href="{{ url_for('modifier_produit', id=produit.id) }}" class="btn btn-outline-primary">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <form method="POST" action="{{ url_for('supprimer_produit', id=produit.id) }}" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Supprimer ce produit ?')">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="{% if can('stocks_manage') %}8{% else %}7{% endif %}" class="text-center py-4 text-muted">
+                            <i class="bi bi-inbox fs-1"></i><br>
+                            Aucun produit enregistré
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% include "_pagination.html" %}
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Derniers mouvements</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date</th>
+                        <th>Produit</th>
+                        <th>Type</th>
+                        <th class="text-end">Variation</th>
+                        <th class="text-end">Avant</th>
+                        <th class="text-end">Après</th>
+                        <th>Motif</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for mouvement in mouvements_recents %}
+                    <tr>
+                        <td>{{ mouvement.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                        <td>{{ mouvement.produit.nom }}</td>
+                        <td><span class="badge bg-light text-dark">{{ mouvement.type_mouvement }}</span></td>
+                        <td class="text-end {% if mouvement.variation >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ "{:+,.2f}".format(mouvement.variation) }}
+                        </td>
+                        <td class="text-end">{{ "{:,.2f}".format(mouvement.stock_avant) }}</td>
+                        <td class="text-end">{{ "{:,.2f}".format(mouvement.stock_apres) }}</td>
+                        <td>{{ mouvement.motif or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-4 text-muted">Aucun mouvement enregistré</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

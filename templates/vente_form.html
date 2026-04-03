@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Nouvelle vente{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="bi bi-receipt-cutoff"></i> Nouvelle vente</h1>
+    <a href="{{ url_for('ventes') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Retour
+    </a>
+</div>
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Référence</label>
+                    <input type="text" name="reference" class="form-control" value="{{ reference }}">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Date *</label>
+                    <input type="date" name="date_vente" class="form-control" required value="{{ date_vente }}">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Montant payé</label>
+                    <input type="number" step="0.01" min="0" name="montant_paye" class="form-control" value="0">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Client *</label>
+                    <input type="text" name="client_nom" class="form-control" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Téléphone</label>
+                    <input type="text" name="client_telephone" class="form-control">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Canal de vente</label>
+                    <select name="canal_vente" class="form-select">
+                        {% for canal in canaux %}
+                        <option value="{{ canal }}" {% if canal == 'OFFLINE' %}selected{% endif %}>{{ canal }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Type de client</label>
+                    <select name="type_client" class="form-select">
+                        {% for type_client in types_client %}
+                        <option value="{{ type_client }}" {% if type_client == 'PARTICULIER' %}selected{% endif %}>{{ type_client }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Région / Zone</label>
+                    <input type="text" name="region" class="form-control" placeholder="Douala, Yaoundé, Nord...">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <div class="form-check mt-4">
+                        <input class="form-check-input" type="checkbox" name="retour_effectue" id="retourEffectue">
+                        <label class="form-check-label" for="retourEffectue">
+                            Retour ou remboursement client
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Montant du retour</label>
+                    <input type="number" step="0.01" min="0" name="montant_retour" class="form-control" value="0">
+                </div>
+            </div>
+
+            <div class="mb-0">
+                <label class="form-label">Commentaire</label>
+                <textarea name="commentaire" class="form-control" rows="3"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-cart"></i> Lignes de vente</h5>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="add-line">
+                <i class="bi bi-plus-circle"></i> Ajouter une ligne
+            </button>
+        </div>
+        <div class="card-body">
+            <div id="lines-container">
+                <div class="row g-3 align-items-end sale-line mb-2">
+                    <div class="col-md-5">
+                        <label class="form-label">Produit *</label>
+                        <select name="produit_id[]" class="form-select produit-select" required>
+                            <option value="">Sélectionner</option>
+                            {% for produit in produits %}
+                            <option value="{{ produit.id }}" data-price="{{ produit.prix_unitaire or 0 }}" data-stock="{{ produit.stock_actuel or 0 }}">
+                                {{ produit.nom }} | stock {{ "{:,.2f}".format(produit.stock_actuel or 0) }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Qté *</label>
+                        <input type="number" name="quantite[]" class="form-control quantite-input" step="0.01" min="0.01" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Prix unitaire *</label>
+                        <input type="number" name="prix_unitaire[]" class="form-control prix-input" step="0.01" min="0" required>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-outline-danger remove-line w-100">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                    <div class="col-12">
+                        <small class="text-muted stock-info"></small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-light mt-3 mb-0">
+                Le stock est décrémenté automatiquement à la validation de la vente.
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">
+        <i class="bi bi-save"></i> Enregistrer la vente
+    </button>
+    <a href="{{ url_for('ventes') }}" class="btn btn-secondary">Annuler</a>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const container = document.getElementById('lines-container');
+    const addButton = document.getElementById('add-line');
+
+    function bindLine(line) {
+        const productSelect = line.querySelector('.produit-select');
+        const priceInput = line.querySelector('.prix-input');
+        const stockInfo = line.querySelector('.stock-info');
+        const removeButton = line.querySelector('.remove-line');
+
+        function refreshLineInfo() {
+            const selected = productSelect.options[productSelect.selectedIndex];
+            if (!selected || !selected.value) {
+                stockInfo.textContent = '';
+                return;
+            }
+            if (!priceInput.value) {
+                priceInput.value = selected.dataset.price || '0';
+            }
+            stockInfo.textContent = `Stock disponible: ${selected.dataset.stock || '0'}`;
+        }
+
+        productSelect.addEventListener('change', refreshLineInfo);
+        removeButton.addEventListener('click', function() {
+            if (container.querySelectorAll('.sale-line').length > 1) {
+                line.remove();
+            }
+        });
+
+        refreshLineInfo();
+    }
+
+    addButton.addEventListener('click', function() {
+        const firstLine = container.querySelector('.sale-line');
+        const newLine = firstLine.cloneNode(true);
+        newLine.querySelectorAll('input').forEach(input => {
+            input.value = '';
+        });
+        newLine.querySelectorAll('select').forEach(select => {
+            select.selectedIndex = 0;
+        });
+        newLine.querySelector('.stock-info').textContent = '';
+        container.appendChild(newLine);
+        bindLine(newLine);
+    });
+
+    container.querySelectorAll('.sale-line').forEach(bindLine);
+</script>
+{% endblock %}

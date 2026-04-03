@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}{{ titre }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="bi bi-box-seam"></i> {{ titre }}</h1>
+    <a href="{{ url_for('stocks') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Retour
+    </a>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Nom *</label>
+                    <input type="text" name="nom" class="form-control" required value="{{ form_values.nom }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Code</label>
+                    <input type="text" name="code" class="form-control" value="{{ form_values.code }}">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Famille</label>
+                    <select name="famille" id="famille" class="form-select">
+                        <option value="">Sélectionner une famille</option>
+                        {% for famille in catalog_ui.families %}
+                        <option value="{{ famille }}" {% if form_values.famille == famille %}selected{% endif %}>{{ famille }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Catégorie</label>
+                    <select
+                        name="categorie"
+                        id="categorie"
+                        class="form-select"
+                        data-selected="{{ form_values.categorie }}"
+                    >
+                        <option value="">Sélectionner une catégorie</option>
+                        {% for categorie in available_categories %}
+                        <option value="{{ categorie }}" {% if form_values.categorie == categorie %}selected{% endif %}>{{ categorie }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">Référentiel chargé depuis le fichier catégories du projet.</div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Unité</label>
+                    <input type="text" name="unite" class="form-control" placeholder="pièce, carton..." value="{{ form_values.unite }}">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Prix unitaire *</label>
+                    <input type="number" step="0.01" min="0" name="prix_unitaire" class="form-control" required value="{{ form_values.prix_unitaire }}">
+                </div>
+                {% if not produit %}
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Stock initial</label>
+                    <input type="number" step="0.01" min="0" name="stock_initial" class="form-control" value="{{ form_values.stock_initial }}">
+                </div>
+                {% endif %}
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Stock minimum</label>
+                    <input type="number" step="0.01" min="0" name="stock_minimum" class="form-control" value="{{ form_values.stock_minimum }}">
+                </div>
+            </div>
+
+            {% if produit %}
+            <div class="alert alert-info">
+                Le stock actuel se modifie via les mouvements de stock pour garder l'historique.
+                Stock actuel: <strong>{{ "{:,.2f}".format(produit.stock_actuel or 0) }} {{ produit.unite or '' }}</strong>
+            </div>
+            {% endif %}
+
+            <div class="mb-3">
+                <label class="form-label">Description</label>
+                <textarea name="description" class="form-control" rows="4">{{ form_values.description }}</textarea>
+            </div>
+
+            <div class="form-check mb-3">
+                <input type="checkbox" name="actif" id="actif" class="form-check-input" {% if form_values.actif %}checked{% endif %}>
+                <label for="actif" class="form-check-label">Produit actif</label>
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save"></i> Enregistrer
+            </button>
+            <a href="{{ url_for('stocks') }}" class="btn btn-secondary">Annuler</a>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const catalog = {{ catalog_ui | tojson }};
+    const familySelect = document.getElementById('famille');
+    const categorySelect = document.getElementById('categorie');
+
+    function renderOptions(select, options, placeholder, selectedValue) {
+        const optionList = Array.isArray(options) ? options : [];
+        select.innerHTML = '';
+
+        const placeholderOption = document.createElement('option');
+        placeholderOption.value = '';
+        placeholderOption.textContent = placeholder;
+        select.appendChild(placeholderOption);
+
+        optionList.forEach(function (value) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            if (selectedValue && selectedValue === value) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+    }
+
+    function syncCategories() {
+        const selectedFamily = familySelect.value;
+        const selectedCategory = categorySelect.dataset.selected || categorySelect.value;
+        const categories = (catalog.categories_by_family || {})[selectedFamily] || [];
+        renderOptions(categorySelect, categories, 'Sélectionner une catégorie', selectedCategory);
+
+        if (selectedCategory && !categories.includes(selectedCategory)) {
+            categorySelect.value = '';
+        }
+        categorySelect.dataset.selected = categorySelect.value;
+    }
+
+    familySelect.addEventListener('change', function () {
+        categorySelect.dataset.selected = '';
+        syncCategories();
+    });
+
+    syncCategories();
+});
+</script>
+{% endblock %}

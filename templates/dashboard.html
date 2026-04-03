@@ -2,16 +2,128 @@
 
 {% block title %}Tableau de bord{% endblock %}
 
+{% block styles %}
+<style>
+.dashboard-root.dashboard-landscape .dashboard-chart-shell {
+    min-height: 220px;
+}
+
+.dashboard-root.dashboard-landscape .dashboard-chart-shell canvas {
+    height: 220px !important;
+}
+
+.dashboard-section-nav {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.35rem;
+    margin-bottom: 1.5rem;
+    scrollbar-width: thin;
+}
+
+.dashboard-section-nav .nav-link {
+    white-space: nowrap;
+    border-radius: 999px;
+    border: 1px solid #dbe3f0;
+    color: #2c3e6d;
+    background: #fff;
+}
+
+.dashboard-section-nav .nav-link.active {
+    background: #2c3e6d;
+    border-color: #2c3e6d;
+    color: #fff;
+}
+
+.dashboard-chart-shell {
+    min-height: 280px;
+}
+
+.dashboard-alert-feed .list-group-item {
+    border-left: 4px solid transparent;
+}
+
+.dashboard-alert-feed .list-group-item.level-danger {
+    border-left-color: #dc3545;
+}
+
+.dashboard-alert-feed .list-group-item.level-warning {
+    border-left-color: #fd7e14;
+}
+
+.dashboard-alert-feed .list-group-item.level-info {
+    border-left-color: #0dcaf0;
+}
+
+.dashboard-code {
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 10px;
+    padding: 0.85rem;
+    font-size: 0.85rem;
+    max-height: 200px;
+    overflow: auto;
+}
+
+.dashboard-toolbar {
+    gap: 0.5rem;
+}
+
+.dashboard-toolbar .btn,
+.dashboard-toolbar .btn-group {
+    margin-bottom: 0.5rem;
+}
+
+@media (max-width: 991.98px) {
+    .dashboard-chart-shell {
+        min-height: 240px;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .dashboard-toolbar {
+        width: 100%;
+        justify-content: flex-start;
+    }
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
     <h1 class="h2">
-        <i class="bi bi-speedometer2"></i> Tableau de bord
+        <i class="bi bi-speedometer2"></i> Tableau de bord analytique
     </h1>
-    <div class="btn-toolbar">
-        <a href="{{ url_for('exporter_excel') }}" class="btn btn-success me-2">
-            <i class="bi bi-file-excel"></i> Exporter Excel
+    <div class="btn-toolbar flex-wrap dashboard-toolbar">
+        <a href="{{ url_for('performances') }}" class="btn btn-outline-primary me-2">
+            <i class="bi bi-graph-up"></i> Performances
         </a>
-        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <a href="{{ url_for('stocks') }}" class="btn btn-outline-secondary me-2">
+            <i class="bi bi-boxes"></i> Stocks
+        </a>
+        <a href="{{ url_for('ventes') }}" class="btn btn-outline-secondary me-2">
+            <i class="bi bi-cash-stack"></i> Ventes
+        </a>
+        <a href="{{ url_for('dashboard_export_excel') }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="btn btn-success me-2">
+            <i class="bi bi-file-excel"></i> Excel brut
+        </a>
+        <a href="{{ url_for('dashboard_export_pdf') }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="btn btn-outline-danger me-2">
+            <i class="bi bi-filetype-pdf"></i> Rapport PDF
+        </a>
+        <button type="button" class="btn btn-outline-dark me-2" id="dashboardCaptureBtn">
+            <i class="bi bi-camera"></i> Capture
+        </button>
+        <button type="button" class="btn btn-outline-warning me-2" id="dashboardNotificationsBtn">
+            <i class="bi bi-bell"></i> Notifications
+        </button>
+        <div class="btn-group me-2" role="group" aria-label="Mode dashboard">
+            <button type="button" class="btn btn-outline-secondary" data-dashboard-layout="portrait">Portrait</button>
+            <button type="button" class="btn btn-outline-secondary" data-dashboard-layout="landscape">Paysage</button>
+        </div>
+        <button type="button" class="btn btn-outline-info me-2" id="dashboardCopyEmbedBtn" {% if not dashboard_embed_code %}disabled{% endif %}>
+            <i class="bi bi-code-slash"></i> Embed
+        </button>
+        {% if can('commandes_manage') %}
         <a href="{{ url_for('ajouter_commande') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg"></i> Nouvelle commande
         </a>
@@ -19,118 +131,799 @@
     </div>
 </div>
 
-<!-- KPI Cards -->
+<div id="dashboard-root"
+     class="dashboard-root"
+     data-alerts-url="{{ dashboard_alerts_api_url or '' }}"
+     data-embed-code="{{ dashboard_embed_code|e }}"
+     data-poll-seconds="{{ dashboard_poll_seconds }}">
+    <div class="dashboard-section-nav nav nav-pills">
+        <a class="nav-link active" href="#section-filtres" data-dashboard-section-link>Filtres</a>
+        <a class="nav-link" href="#section-kpi" data-dashboard-section-link>Synthèse</a>
+        <a class="nav-link" href="#section-ventes" data-dashboard-section-link>Ventes</a>
+        <a class="nav-link" href="#section-fournisseurs" data-dashboard-section-link>Fournisseurs</a>
+        <a class="nav-link" href="#section-operations" data-dashboard-section-link>Opérations</a>
+    </div>
+
+<div class="card shadow-sm mb-4" id="section-filtres" data-dashboard-section>
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-funnel"></i> Filtres analytiques</h5>
+    </div>
+    <div class="card-body">
+        <form method="GET" class="row g-3">
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Période</label>
+                <select name="period" class="form-select">
+                    <option value="today" {% if filtres.period == 'today' %}selected{% endif %}>Aujourd'hui</option>
+                    <option value="week" {% if filtres.period == 'week' %}selected{% endif %}>Cette semaine</option>
+                    <option value="month" {% if filtres.period == 'month' %}selected{% endif %}>Ce mois</option>
+                    <option value="year" {% if filtres.period == 'year' %}selected{% endif %}>Cette année</option>
+                    <option value="custom" {% if filtres.period == 'custom' %}selected{% endif %}>Personnalisée</option>
+                    <option value="all" {% if filtres.period == 'all' %}selected{% endif %}>Tout</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Comparaison</label>
+                <select name="comparison" class="form-select">
+                    <option value="none" {% if filtres.comparison == 'none' %}selected{% endif %}>Aucune</option>
+                    <option value="mom" {% if filtres.comparison == 'mom' %}selected{% endif %}>MoM</option>
+                    <option value="yoy" {% if filtres.comparison == 'yoy' %}selected{% endif %}>YoY</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Début</label>
+                <input type="date" name="start_date" class="form-control" value="{{ filtres.start_date.isoformat() if filtres.start_date else '' }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Fin</label>
+                <input type="date" name="end_date" class="form-control" value="{{ filtres.end_date.isoformat() if filtres.end_date else '' }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Catégorie produit</label>
+                <select name="categorie" class="form-select">
+                    <option value="">Toutes</option>
+                    {% for categorie in categories %}
+                    <option value="{{ categorie }}" {% if filtres.categorie == categorie %}selected{% endif %}>{{ categorie }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Produit</label>
+                <select name="produit_id" class="form-select">
+                    <option value="">Tous</option>
+                    {% for produit in produits %}
+                    <option value="{{ produit.id }}" {% if filtres.produit_id == produit.id|string %}selected{% endif %}>{{ produit.nom }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Canal</label>
+                <select name="canal" class="form-select">
+                    <option value="">Tous</option>
+                    {% for canal in canaux %}
+                    <option value="{{ canal }}" {% if filtres.canal == canal %}selected{% endif %}>{{ canal }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Région / Zone</label>
+                <select name="region" class="form-select">
+                    <option value="">Toutes</option>
+                    {% for region in regions %}
+                    <option value="{{ region }}" {% if filtres.region == region %}selected{% endif %}>{{ region }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Type client</label>
+                <select name="type_client" class="form-select">
+                    <option value="">Tous</option>
+                    {% for type_client in types_client %}
+                    <option value="{{ type_client }}" {% if filtres.type_client == type_client %}selected{% endif %}>{{ type_client }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <div>
+                    <button type="submit" class="btn btn-primary me-2">
+                        <i class="bi bi-funnel"></i> Appliquer
+                    </button>
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Réinitialiser</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if comparison_label and (sales_comparison_pct is not none or purchases_comparison_pct is not none) %}
+<div class="alert alert-light border d-flex justify-content-between flex-wrap mb-4">
+    <div><strong>Comparaison {{ comparison_label }}</strong></div>
+    <div class="me-3">Ventes:
+        <span class="badge {% if sales_comparison_pct is not none and sales_comparison_pct >= 0 %}bg-success{% else %}bg-danger{% endif %}">
+            {{ "{:+.1f}".format(sales_comparison_pct or 0) }}%
+        </span>
+    </div>
+    <div>Achats:
+        <span class="badge {% if purchases_comparison_pct is not none and purchases_comparison_pct >= 0 %}bg-success{% else %}bg-danger{% endif %}">
+            {{ "{:+.1f}".format(purchases_comparison_pct or 0) }}%
+        </span>
+    </div>
+</div>
+{% endif %}
+
+<div class="row mb-4" id="section-kpi" data-dashboard-section>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-broadcast-pin"></i> Centre d'alertes</h5>
+                <span class="badge bg-dark" id="dashboardAlertCount">{{ dashboard_alert_counts.total }}</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush dashboard-alert-feed" id="dashboardAlertFeed">
+                    {% for alert in dashboard_alerts %}
+                    <div class="list-group-item level-{{ alert.level }}" data-alert-id="{{ alert.id }}">
+                        <div class="d-flex justify-content-between align-items-start gap-3">
+                            <div>
+                                <div class="fw-semibold">{{ alert.title }}</div>
+                                <div class="small text-muted">{{ alert.message }}</div>
+                            </div>
+                            <span class="badge {% if alert.level == 'danger' %}bg-danger{% elif alert.level == 'warning' %}bg-warning text-dark{% else %}bg-info text-dark{% endif %}">
+                                {{ alert.category }}
+                            </span>
+                        </div>
+                        {% if alert.url %}
+                        <a href="{{ alert.url }}" class="small text-decoration-none">Ouvrir</a>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="list-group-item text-muted">Aucune alerte active</div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="card-footer bg-white d-flex gap-2 flex-wrap">
+                <span class="badge bg-danger-subtle text-danger">{{ dashboard_alert_counts.danger }} critique(s)</span>
+                <span class="badge bg-warning-subtle text-warning-emphasis">{{ dashboard_alert_counts.warning }} avertissement(s)</span>
+                <span class="badge bg-info-subtle text-info-emphasis">{{ dashboard_alert_counts.info }} information(s)</span>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-envelope-paper"></i> Envoi programmé</h5>
+            </div>
+            <div class="card-body">
+                {% if can('dashboard_manage') %}
+                <form method="POST" action="{{ url_for('dashboard_subscriptions_create') }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="mb-3">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-2">
+                        <label class="form-label small text-muted">Email destinataire</label>
+                        <input type="email" name="email" class="form-control" placeholder="rapport@exemple.com" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small text-muted">Fréquence</label>
+                        <select name="frequency" class="form-select">
+                            <option value="DAILY">Quotidien</option>
+                            <option value="WEEKLY">Hebdomadaire</option>
+                        </select>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="include_pdf" id="includePdf" checked>
+                        <label class="form-check-label" for="includePdf">Joindre le PDF</label>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="include_excel" id="includeExcel" checked>
+                        <label class="form-check-label" for="includeExcel">Joindre l'Excel brut</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Créer l'abonnement</button>
+                </form>
+                {% endif %}
+                {% if email_reporting_ready %}
+                <div class="small text-muted">SMTP configuré{% if dashboard_scheduler_enabled %}, scheduler actif{% else %}, scheduler à activer par variable d'environnement{% endif %}.</div>
+                {% else %}
+                <div class="alert alert-warning mb-0 py-2">Configuration SMTP absente: les emails planifiés ne partiront pas tant que `MAIL_SERVER` n'est pas défini.</div>
+                {% endif %}
+                {% if subscriptions %}
+                <div class="mt-3 pt-3 border-top">
+                    <div class="small fw-semibold text-uppercase text-muted mb-2">Abonnements actifs</div>
+                    {% for subscription in subscriptions[:4] %}
+                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                        <div class="small">
+                            <div class="fw-semibold">{{ subscription.email }}</div>
+                            <div class="text-muted">
+                                {{ subscription.frequency }}
+                                {% if subscription.next_send_at %}
+                                • prochain envoi {{ subscription.next_send_at.strftime('%d/%m %H:%M') }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% if can('dashboard_manage') %}
+                        <form method="POST" action="{{ url_for('dashboard_subscription_delete', id=subscription.id) }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Supprimer</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-code-square"></i> Dashboard embeddable</h5>
+            </div>
+            <div class="card-body">
+                <div class="small text-muted mb-2">Intégration iframe avec le filtre courant.</div>
+                {% if dashboard_embed_url %}
+                <a href="{{ dashboard_embed_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mb-3">
+                    <i class="bi bi-box-arrow-up-right"></i> Ouvrir la vue embarquée
+                </a>
+                <pre class="dashboard-code mb-0">{{ dashboard_embed_code }}</pre>
+                {% else %}
+                <div class="text-muted">Embed indisponible hors contexte HTTP.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row mb-4">
-    <div class="col-md-3 mb-3">
+    <div class="col-lg-3 col-md-6 mb-3">
         <div class="card card-stats stat-bleu shadow-sm">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <small class="text-muted text-uppercase">Total commandes</small>
-                        <h2 class="mb-0 mt-1">{{ total_commandes }}</h2>
-                    </div>
-                    <div class="stat-icon text-primary">
-                        <i class="bi bi-cart-check"></i>
-                    </div>
-                </div>
+                <small class="text-muted text-uppercase">Commandes</small>
+                <h2 class="mb-0 mt-1">{{ total_commandes }}</h2>
+                <div class="text-muted small mt-2">Moyenne {{ "{:,.0f}".format(montant_moyen_commande or 0) }} FCFA</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div class="col-lg-3 col-md-6 mb-3">
         <div class="card card-stats stat-vert shadow-sm">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <small class="text-muted text-uppercase">Montant total</small>
-                        <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(montant_total) }} FCFA</h2>
-                    </div>
-                    <div class="stat-icon text-success">
-                        <i class="bi bi-currency-dollar"></i>
-                    </div>
-                </div>
+                <small class="text-muted text-uppercase">Montant achats</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(montant_total or 0) }} FCFA</h2>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div class="col-lg-3 col-md-6 mb-3">
         <div class="card card-stats stat-rouge shadow-sm">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <small class="text-muted text-uppercase">À payer</small>
-                        <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_a_payer) }} FCFA</h2>
-                    </div>
-                    <div class="stat-icon text-danger">
-                        <i class="bi bi-exclamation-triangle"></i>
-                    </div>
-                </div>
+                <small class="text-muted text-uppercase">À payer fournisseurs</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_a_payer or 0) }} FCFA</h2>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div class="col-lg-3 col-md-6 mb-3">
         <div class="card card-stats stat-orange shadow-sm">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <small class="text-muted text-uppercase">Commandes en retard</small>
-                        <h2 class="mb-0 mt-1">{{ nb_retard }}</h2>
-                    </div>
-                    <div class="stat-icon text-warning">
-                        <i class="bi bi-clock-history"></i>
-                    </div>
+                <small class="text-muted text-uppercase">Commandes en retard</small>
+                <h2 class="mb-0 mt-1">{{ nb_retard }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4" id="section-performances" data-dashboard-section>
+    <div class="col-lg-2 col-md-4 mb-3">
+        <div class="card card-stats stat-bleu shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Ventes</small>
+                <h2 class="mb-0 mt-1">{{ total_ventes }}</h2>
+                <div class="text-muted small mt-2">Ticket moyen {{ "{:,.0f}".format(ticket_moyen or 0) }} FCFA</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 mb-3">
+        <div class="card card-stats stat-vert shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">CA brut</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(chiffre_affaires_brut or 0) }} FCFA</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 mb-3">
+        <div class="card card-stats stat-vert shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">CA net</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(chiffre_affaires_net or 0) }} FCFA</h2>
+                <div class="text-muted small mt-2">Retours {{ "{:,.0f}".format(total_retours or 0) }} FCFA</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 mb-3">
+        <div class="card card-stats stat-orange shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Encaissements</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_encaisse or 0) }} FCFA</h2>
+                <div class="text-muted small mt-2">{{ "{:,.1f}".format(taux_encaissement or 0) }}% encaissé</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 mb-3">
+        <div class="card card-stats stat-rouge shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Taux de retour client</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.1f}".format(taux_retour_client or 0) }}%</h2>
+                <div class="text-muted small mt-2">{{ clients_retour }} client(s) / {{ clients_total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 mb-3">
+        <div class="card card-stats stat-bleu shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">CLV moyen</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(clv_moyen or 0) }} FCFA</h2>
+                <div class="text-muted small mt-2">{{ ventes_en_attente }} vente(s) à solder</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Pareto produits 80/20</small>
+                <h3 class="mt-2 mb-1">{{ pareto_nombre }} produit(s)</h3>
+                <div class="text-muted">{{ "{:,.1f}".format(pareto_ratio_produits or 0) }}% des produits représentent {{ "{:,.1f}".format(pareto_part_ca or 0) }}% du CA</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Valeur du stock</small>
+                <h3 class="mt-2 mb-1">{{ "{:,.0f}".format(valeur_stock or 0) }} FCFA</h3>
+                <div class="text-muted">{{ total_produits_actifs }} produit(s) actif(s)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Stock faible</small>
+                <h3 class="mt-2 mb-1">{{ nb_stock_faible }}</h3>
+                <div class="text-muted">{{ nb_ruptures_stock }} rupture(s)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Fournisseurs suivis</small>
+                <h3 class="mt-2 mb-1">{{ total_fournisseurs_analytiques }}</h3>
+                <div class="text-muted">{{ fournisseurs_excellents }} excellent(s) • score moyen {{ "{:,.2f}".format(score_moyen_fournisseurs or 0) }}/5</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <a href="{{ url_for('performances_acheteurs') }}" class="text-decoration-none">
+            <div class="card shadow-sm h-100 text-center hover-card">
+                <div class="card-body py-4">
+                    <i class="bi bi-person-badge fs-1 text-primary"></i>
+                    <h5 class="mt-2 mb-1">Acheteurs</h5>
+                    <p class="text-muted mb-0">Volumes, fournisseurs et retards</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3 mb-3">
+        <a href="{{ url_for('performances_fournisseurs') }}" class="text-decoration-none">
+            <div class="card shadow-sm h-100 text-center hover-card">
+                <div class="card-body py-4">
+                    <i class="bi bi-truck fs-1 text-success"></i>
+                    <h5 class="mt-2 mb-1">Fournisseurs</h5>
+                    <p class="text-muted mb-0">Fiabilité, délais, paiement et poids achats</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3 mb-3">
+        <a href="{{ url_for('performances_produits') }}" class="text-decoration-none">
+            <div class="card shadow-sm h-100 text-center hover-card">
+                <div class="card-body py-4">
+                    <i class="bi bi-box-seam fs-1 text-warning"></i>
+                    <h5 class="mt-2 mb-1">Produits</h5>
+                    <p class="text-muted mb-0">Tendances d'achat et références fortes</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3 mb-3">
+        <a href="{{ url_for('performances_ventes') }}" class="text-decoration-none">
+            <div class="card shadow-sm h-100 text-center hover-card">
+                <div class="card-body py-4">
+                    <i class="bi bi-cash-stack fs-1 text-danger"></i>
+                    <h5 class="mt-2 mb-1">Ventes</h5>
+                    <p class="text-muted mb-0">Canal, catégorie, clients et produits</p>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<div class="row mb-4" id="section-ventes" data-dashboard-section>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Évolution des achats</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartEvolutionAchats" height="220"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-graph-up-arrow"></i> Évolution des ventes</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartEvolutionVentes" height="220"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-4 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Ventes par catégorie</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartCategories" height="260"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Performance par canal</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartCanaux" height="260"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-geo-alt"></i> Ventes par région</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartRegions" height="260"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-people"></i> Top clients</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartClients" height="240"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-diagram-3"></i> Types de client</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartTypesClient" height="240"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4" id="section-fournisseurs" data-dashboard-section>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-truck"></i> Top fournisseurs</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartFournisseurs" height="240"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Répartition achats par entité</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartEntite" height="240"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-7 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-bar-chart-steps"></i> Pareto produits ventes</h5>
+            </div>
+            <div class="card-body dashboard-chart-shell">
+                <canvas id="chartParetoProduits" height="260"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-stars"></i> Produits 80/20</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Produit</th>
+                                <th class="text-end">CA</th>
+                                <th class="text-end">Cumul</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for produit in pareto_produits %}
+                            <tr>
+                                <td>
+                                    <strong>{{ produit.nom }}</strong>
+                                    <br><small class="text-muted">{{ produit.categorie }}</small>
+                                </td>
+                                <td class="text-end">{{ "{:,.0f}".format(produit.chiffre_affaires or 0) }} FCFA</td>
+                                <td class="text-end">{{ "{:,.1f}".format(produit.cumul_part_ca or 0) }}%</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="3" class="text-center py-4 text-muted">Aucune donnée produit</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Charts Row -->
-<div class="row mb-4">
-    <div class="col-md-6 mb-3">
-        <div class="card shadow-sm h-100">
-            <div class="card-header bg-white">
-                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Répartition par entité</h5>
+<div class="row mb-4" id="section-operations" data-dashboard-section>
+    <div class="col-lg-12 mb-3">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-speedometer"></i> Produits sous surveillance</h5>
+                <span class="badge bg-light text-dark">Seuil {{ "{:,.0f}".format(dashboard_product_threshold or 0) }} FCFA</span>
             </div>
-            <div class="card-body">
-                <canvas id="chartEntite" height="250"></canvas>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Produit</th>
+                                <th class="text-end">CA</th>
+                                <th class="text-end">Ventes</th>
+                                <th class="text-end">Qté vendue</th>
+                                <th class="text-end">Stock</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for produit in low_performing_products %}
+                            <tr>
+                                <td>
+                                    <strong>{{ produit.nom }}</strong>
+                                    <br><small class="text-muted">{{ produit.categorie }}</small>
+                                </td>
+                                <td class="text-end">{{ "{:,.0f}".format(produit.chiffre_affaires or 0) }} FCFA</td>
+                                <td class="text-end">{{ produit.nb_ventes }}</td>
+                                <td class="text-end">{{ "{:,.0f}".format(produit.quantite_vendue or 0) }}</td>
+                                <td class="text-end">{{ "{:,.0f}".format(produit.stock_actuel or 0) }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">Aucun produit sous surveillance</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-6 mb-3">
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-7 mb-3">
         <div class="card shadow-sm h-100">
-            <div class="card-header bg-white">
-                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Évolution mensuelle</h5>
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-truck-front"></i> Performance fournisseurs</h5>
+                <a href="{{ url_for('performances_fournisseurs') }}" class="btn btn-sm btn-outline-primary">Vue complète</a>
             </div>
-            <div class="card-body">
-                <canvas id="chartEvolution" height="250"></canvas>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Fournisseur</th>
+                                <th class="text-end">Montant</th>
+                                <th class="text-end">Score</th>
+                                <th class="text-end">Conformité</th>
+                                <th class="text-end">Rupture</th>
+                                <th class="text-end">Fiabilité</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for fournisseur in top_fournisseurs %}
+                            <tr>
+                                <td>
+                                    <strong>{{ fournisseur.nom }}</strong>
+                                    <br><small class="text-muted">{{ fournisseur.pays or '-' }}</small>
+                                </td>
+                                <td class="text-end">{{ "{:,.0f}".format(fournisseur.total_montant or 0) }} FCFA</td>
+                                <td class="text-end">
+                                    {% if fournisseur.score_performance is not none %}
+                                    {{ "{:,.2f}".format(fournisseur.score_performance) }}/5
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">{{ "{:,.1f}".format(fournisseur.taux_conformite or 0) }}%</td>
+                                <td class="text-end">{{ "{:,.1f}".format(fournisseur.taux_rupture or 0) }}%</td>
+                                <td class="text-end">{{ "{:,.1f}".format(fournisseur.score_fiabilite or 0) }}/100</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center py-4 text-muted">Aucune donnée fournisseur</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-exclamation-diamond"></i> Fournisseurs critiques</h5>
+                <span class="badge bg-light text-dark">{{ fournisseurs_critiques|length }}</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Nom</th>
+                                <th class="text-end">À payer</th>
+                                <th class="text-end">Retard</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for fournisseur in fournisseurs_critiques %}
+                            <tr>
+                                <td>{{ fournisseur.nom }}</td>
+                                <td class="text-end">{{ "{:,.0f}".format(fournisseur.montant_a_payer or 0) }} FCFA</td>
+                                <td class="text-end">{{ "{:,.1f}".format(fournisseur.taux_retard or 0) }}%</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="3" class="text-center py-4 text-muted">Aucun fournisseur critique</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
 <div class="row mb-4">
-    <div class="col-md-6 mb-3">
+    <div class="col-lg-7 mb-3">
         <div class="card shadow-sm h-100">
-            <div class="card-header bg-white">
-                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Top 5 fournisseurs</h5>
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-receipt-cutoff"></i> Dernières ventes</h5>
+                <a href="{{ url_for('ventes') }}" class="btn btn-sm btn-outline-primary">Voir tout</a>
             </div>
-            <div class="card-body">
-                <canvas id="chartFournisseurs" height="250"></canvas>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Référence</th>
+                                <th>Date</th>
+                                <th>Client</th>
+                                <th>Canal</th>
+                                <th class="text-end">Net</th>
+                                <th>Statut</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for vente in dernieres_ventes %}
+                            <tr>
+                                <td><a href="{{ url_for('voir_vente', id=vente.id) }}">{{ vente.reference }}</a></td>
+                                <td>{{ format_date(vente.date_vente) }}</td>
+                                <td>{{ vente.client_nom or '-' }}</td>
+                                <td>{{ vente.canal_vente or '-' }}</td>
+                                <td class="text-end">{{ "{:,.0f}".format(vente.montant_net or 0) }} FCFA</td>
+                                <td>
+                                    {% if vente.statut_paiement == 'PAYÉE' %}
+                                    <span class="badge bg-success">{{ vente.statut_paiement }}</span>
+                                    {% elif vente.statut_paiement == 'PARTIELLE' %}
+                                    <span class="badge bg-warning text-dark">{{ vente.statut_paiement }}</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">{{ vente.statut_paiement }}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center py-4 text-muted">Aucune vente enregistrée</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-6 mb-3">
+    <div class="col-lg-5 mb-3">
         <div class="card shadow-sm h-100">
-            <div class="card-header bg-white">
-                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Répartition par statut</h5>
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-exclamation-diamond"></i> Alertes stock</h5>
+                <a href="{{ url_for('stocks', etat='faible') }}" class="btn btn-sm btn-outline-primary">Voir tout</a>
             </div>
-            <div class="card-body">
-                <canvas id="chartStatut" height="250"></canvas>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Produit</th>
+                                <th class="text-end">Stock</th>
+                                <th class="text-end">Min</th>
+                                <th>État</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for produit in alertes_stock %}
+                            <tr>
+                                <td>
+                                    <strong>{{ produit.nom }}</strong>
+                                    {% if produit.code %}<br><small class="text-muted">{{ produit.code }}</small>{% endif %}
+                                </td>
+                                <td class="text-end">{{ "{:,.2f}".format(produit.stock_actuel or 0) }}</td>
+                                <td class="text-end">{{ "{:,.2f}".format(produit.stock_minimum or 0) }}</td>
+                                <td>
+                                    {% if (produit.stock_actuel or 0) <= 0 %}
+                                    <span class="badge bg-danger">Rupture</span>
+                                    {% else %}
+                                    <span class="badge bg-warning text-dark">Faible</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-center py-4 text-muted">Aucune alerte stock</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Recent Orders -->
 <div class="card shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="bi bi-receipt"></i> Dernières commandes</h5>
@@ -145,8 +938,8 @@
                         <th>Date CDE</th>
                         <th>Entité</th>
                         <th>Fournisseur</th>
-                        <th>Montant</th>
-                        <th>Solde</th>
+                        <th class="text-end">Montant</th>
+                        <th class="text-end">Solde</th>
                         <th>Statut</th>
                         <th>Délai</th>
                     </tr>
@@ -158,8 +951,8 @@
                         <td>{{ format_date(c.date_cde) }}</td>
                         <td><span class="badge bg-secondary">{{ c.entite or '-' }}</span></td>
                         <td>{{ c.fournisseur.nom if c.fournisseur else '-' }}</td>
-                        <td class="text-end">{{ "{:,.0f}".format(c.montant) }} FCFA</td>
-                        <td class="text-end">{{ "{:,.0f}".format(c.solde) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(c.montant or 0) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(c.solde or 0) }} FCFA</td>
                         <td>
                             <span class="badge {% if c.est_payee() %}bg-success{% else %}bg-danger{% endif %}">
                                 {{ c.statut or '-' }}
@@ -175,10 +968,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8" class="text-center py-4 text-muted">
-                            <i class="bi bi-inbox fs-1"></i><br>
-                            Aucune commande enregistrée
-                        </td>
+                        <td colspan="8" class="text-center py-4 text-muted">Aucune commande enregistrée</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -186,110 +976,248 @@
         </div>
     </div>
 </div>
+
+</div>
+
+<style>
+.hover-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.hover-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
-    // Graphique par entité
-    const ctxEntite = document.getElementById('chartEntite').getContext('2d');
-    new Chart(ctxEntite, {
-        type: 'doughnut',
-        data: {
-            labels: [{% for e in par_entite %}'{{ e[0] }}',{% endfor %}],
-            datasets: [{
-                data: [{% for e in par_entite %}{{ e[1] }},{% endfor %}],
-                backgroundColor: ['#2c3e6d', '#3498db', '#5dade2', '#85c1e9'],
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { position: 'bottom' }
+const palette = ['#2c3e6d', '#198754', '#ffc107', '#dc3545', '#0dcaf0', '#6f42c1', '#fd7e14', '#20c997'];
+window.dashboardCharts = [];
+function registerDashboardChart(chart) {
+    window.dashboardCharts.push(chart);
+    return chart;
+}
+
+registerDashboardChart(new Chart(document.getElementById('chartEvolutionAchats').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: {{ evolution_achats | map(attribute='mois') | list | tojson }},
+        datasets: [{
+            label: 'Achats (FCFA)',
+            data: {{ evolution_achats | map(attribute='total') | list | tojson }},
+            borderColor: '#2c3e6d',
+            backgroundColor: 'rgba(44, 62, 109, 0.10)',
+            fill: true,
+            tension: 0.3
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: { beginAtZero: true, ticks: { callback: value => value.toLocaleString() } }
+        }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartEvolutionVentes').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: {{ evolution | map(attribute='mois') | list | tojson }},
+        datasets: [{
+            label: 'Ventes (FCFA)',
+            data: {{ evolution | map(attribute='total') | list | tojson }},
+            borderColor: '#dc3545',
+            backgroundColor: 'rgba(220, 53, 69, 0.12)',
+            fill: true,
+            tension: 0.35
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: { beginAtZero: true, ticks: { callback: value => value.toLocaleString() } }
+        }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartCategories').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+        labels: {{ ventes_par_categorie | map(attribute='categorie') | list | tojson }},
+        datasets: [{
+            data: {{ ventes_par_categorie | map(attribute='chiffre_affaires') | list | tojson }},
+            backgroundColor: palette,
+            borderWidth: 0
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' } }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartCanaux').getContext('2d'), {
+    type: 'bar',
+    data: {
+        labels: {{ ventes_par_canal | map(attribute='canal') | list | tojson }},
+        datasets: [{
+            label: 'CA (FCFA)',
+            data: {{ ventes_par_canal | map(attribute='chiffre_affaires') | list | tojson }},
+            backgroundColor: ['#198754', '#2c3e6d', '#dc3545'],
+            borderRadius: 8
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: { beginAtZero: true, ticks: { callback: value => value.toLocaleString() } }
+        }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartRegions').getContext('2d'), {
+    type: 'bar',
+    data: {
+        labels: {{ ventes_par_region | map(attribute='region') | list | tojson }},
+        datasets: [{
+            label: 'CA (FCFA)',
+            data: {{ ventes_par_region | map(attribute='chiffre_affaires') | list | tojson }},
+            backgroundColor: '#0dcaf0',
+            borderRadius: 8
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: { beginAtZero: true, ticks: { callback: value => value.toLocaleString() } }
+        }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartClients').getContext('2d'), {
+    type: 'bar',
+    data: {
+        labels: {{ top_clients | map(attribute='client_nom') | list | tojson }},
+        datasets: [{
+            label: 'CA (FCFA)',
+            data: {{ top_clients | map(attribute='chiffre_affaires') | list | tojson }},
+            backgroundColor: '#198754',
+            borderRadius: 8
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: { beginAtZero: true, ticks: { callback: value => value.toLocaleString() } }
+        }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartTypesClient').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+        labels: {{ ventes_par_type_client | map(attribute='type_client') | list | tojson }},
+        datasets: [{
+            data: {{ ventes_par_type_client | map(attribute='chiffre_affaires') | list | tojson }},
+            backgroundColor: ['#2c3e6d', '#198754', '#ffc107', '#dc3545'],
+            borderWidth: 0
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' } }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartFournisseurs').getContext('2d'), {
+    type: 'bar',
+    data: {
+        labels: {{ top_fournisseurs | map(attribute='nom') | list | tojson }},
+        datasets: [{
+            label: 'Montant achats (FCFA)',
+            data: {{ top_fournisseurs | map(attribute='total_montant') | list | tojson }},
+            backgroundColor: '#2c3e6d',
+            borderRadius: 8
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: { beginAtZero: true, ticks: { callback: value => value.toLocaleString() } }
+        }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartEntite').getContext('2d'), {
+    type: 'pie',
+    data: {
+        labels: {{ par_entite | map(attribute='entite') | list | tojson }},
+        datasets: [{
+            data: {{ par_entite | map(attribute='montant') | list | tojson }},
+            backgroundColor: palette,
+            borderWidth: 0
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' } }
+    }
+}));
+
+registerDashboardChart(new Chart(document.getElementById('chartParetoProduits').getContext('2d'), {
+    data: {
+        labels: {{ top_produits | map(attribute='nom') | list | tojson }},
+        datasets: [{
+            type: 'bar',
+            label: 'CA (FCFA)',
+            data: {{ top_produits | map(attribute='chiffre_affaires') | list | tojson }},
+            backgroundColor: '#fd7e14',
+            borderRadius: 8,
+            yAxisID: 'y'
+        }, {
+            type: 'line',
+            label: 'Cumul %',
+            data: {{ top_produits | map(attribute='cumul_part_ca') | list | tojson }},
+            borderColor: '#dc3545',
+            backgroundColor: '#dc3545',
+            tension: 0.3,
+            yAxisID: 'y1'
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true,
+                position: 'left',
+                ticks: { callback: value => value.toLocaleString() }
+            },
+            y1: {
+                beginAtZero: true,
+                position: 'right',
+                grid: { drawOnChartArea: false },
+                max: 100,
+                ticks: { callback: value => value + '%' }
             }
         }
-    });
-    
-    // Graphique évolution
-    const ctxEvolution = document.getElementById('chartEvolution').getContext('2d');
-    new Chart(ctxEvolution, {
-        type: 'line',
-        data: {
-            labels: [{% for e in evolution %}'{{ e.mois }}',{% endfor %}],
-            datasets: [{
-                label: 'Montant (FCFA)',
-                data: [{% for e in evolution %}{{ e.total }},{% endfor %}],
-                borderColor: '#2c3e6d',
-                backgroundColor: 'rgba(44, 62, 109, 0.1)',
-                tension: 0.3,
-                fill: true
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return value.toLocaleString() + ' FCFA';
-                        }
-                    }
-                }
-            }
-        }
-    });
-    
-    // Graphique top fournisseurs
-    const ctxFourn = document.getElementById('chartFournisseurs').getContext('2d');
-    new Chart(ctxFourn, {
-        type: 'bar',
-        data: {
-            labels: [{% for f in top_fournisseurs %}'{{ f[0] }}',{% endfor %}],
-            datasets: [{
-                label: 'Montant total (FCFA)',
-                data: [{% for f in top_fournisseurs %}{{ f[1] }},{% endfor %}],
-                backgroundColor: '#2c3e6d',
-                borderRadius: 8
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return value.toLocaleString();
-                        }
-                    }
-                }
-            }
-        }
-    });
-    
-    // Graphique par statut
-    const ctxStatut = document.getElementById('chartStatut').getContext('2d');
-    new Chart(ctxStatut, {
-        type: 'pie',
-        data: {
-            labels: [{% for s in par_statut %}'{{ s[0] }}',{% endfor %}],
-            datasets: [{
-                data: [{% for s in par_statut %}{{ s[1] }},{% endfor %}],
-                backgroundColor: ['#28a745', '#dc3545'],
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: { position: 'bottom' }
-            }
-        }
-    });
+    }
+}));
 </script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

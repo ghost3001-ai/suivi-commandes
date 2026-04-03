@@ -8,7 +8,7 @@
         <i class="bi bi-receipt"></i> Commande #{{ commande.nr or 'Nouvelle' }}
     </h1>
     <div>
-        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        {% if can('commandes_manage') %}
         <a href="{{ url_for('modifier_commande', id=commande.id) }}" class="btn btn-warning">
             <i class="bi bi-pencil"></i> Modifier
         </a>
@@ -88,6 +88,16 @@
                         <span class="badge badge-retard ms-2">En retard (+{{ commande.get_delai() }}j)</span>
                         {% endif %}
                     </dd>
+
+                    <dt class="col-sm-3">Réception réelle</dt>
+                    <dd class="col-sm-9">
+                        {{ format_date(commande.date_reception) or '-' }}
+                        {% if commande.get_ecart_livraison() is not none %}
+                        <span class="badge {% if commande.get_ecart_livraison() < 10 %}bg-success{% else %}bg-warning text-dark{% endif %} ms-2">
+                            {{ commande.get_ecart_livraison() }}j vs prévu
+                        </span>
+                        {% endif %}
+                    </dd>
                     
                     <dt class="col-sm-3">N° Bon livraison</dt>
                     <dd class="col-sm-9">{{ commande.bon_livraison or '-' }}</dd>
@@ -128,6 +138,51 @@
                     
                     <dt class="col-sm-6">Date paiement</dt>
                     <dd class="col-sm-6 text-end">{{ format_date(commande.date_paiement) or '-' }}</dd>
+                </dl>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-clipboard2-pulse"></i> Évaluation fournisseur</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-7">Commande conforme</dt>
+                    <dd class="col-sm-5 text-end">
+                        <span class="badge {% if commande.commande_conforme %}bg-success{% else %}bg-danger{% endif %}">
+                            {{ 'Oui' if commande.commande_conforme else 'Non' }}
+                        </span>
+                    </dd>
+
+                    <dt class="col-sm-7">Rupture fournisseur</dt>
+                    <dd class="col-sm-5 text-end">
+                        <span class="badge {% if commande.rupture_fournisseur %}bg-danger{% else %}bg-success{% endif %}">
+                            {{ 'Oui' if commande.rupture_fournisseur else 'Non' }}
+                        </span>
+                    </dd>
+
+                    <dt class="col-sm-7">Note performance</dt>
+                    <dd class="col-sm-5 text-end">{{ commande.note_fournisseur if commande.note_fournisseur is not none else '-' }}</dd>
+
+                    <dt class="col-sm-7">Note SAV</dt>
+                    <dd class="col-sm-5 text-end">{{ commande.note_service if commande.note_service is not none else '-' }}</dd>
+
+                    <dt class="col-sm-7">Prix marché</dt>
+                    <dd class="col-sm-5 text-end">
+                        {{ "{:,.0f}".format(commande.prix_reference_marche or 0) }} FCFA
+                    </dd>
+
+                    <dt class="col-sm-7">Écart vs marché</dt>
+                    <dd class="col-sm-5 text-end">
+                        {% if commande.get_ecart_prix_marche_pct() is not none %}
+                        <span class="{% if commande.get_ecart_prix_marche_pct() <= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ "{:+.1f}".format(commande.get_ecart_prix_marche_pct()) }}%
+                        </span>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </dd>
                 </dl>
             </div>
         </div>

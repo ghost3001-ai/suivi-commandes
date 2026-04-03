@@ -48,6 +48,12 @@
                         <td>
                             {% if u.role == 'admin' %}
                             <span class="badge bg-danger">Admin</span>
+                            {% elif u.role == 'achats' %}
+                            <span class="badge bg-primary">Achats</span>
+                            {% elif u.role == 'gestionnaire_stock' %}
+                            <span class="badge bg-warning text-dark">Gestionnaire stock</span>
+                            {% elif u.role == 'ingenieur' %}
+                            <span class="badge bg-info text-dark">Ingénieur</span>
                             {% else %}
                             <span class="badge bg-secondary">Spectateur</span>
                             {% endif %}

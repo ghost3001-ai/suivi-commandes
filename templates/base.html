@@ -217,38 +217,78 @@
                         <small>Gestion des commandes</small>
                     </div>
                     <ul class="nav flex-column">
+                        {% if current_user.is_authenticated and can('dashboard_view') %}
                         <li class="nav-item">
                             <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
                                 <i class="bi bi-speedometer2"></i> Tableau de bord
                             </a>
                         </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('commandes_view') %}
                         <li class="nav-item">
                             <a class="nav-link {% if request.endpoint == 'commandes' %}active{% endif %}" href="{{ url_for('commandes') }}">
                                 <i class="bi bi-list-check"></i> Commandes
                             </a>
                         </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('stocks_view') %}
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint in ['stocks', 'ajouter_produit', 'modifier_produit', 'supprimer_produit', 'mouvements_stock', 'ajouter_mouvement_stock'] %}active{% endif %}" href="{{ url_for('stocks') }}">
+                                <i class="bi bi-boxes"></i> Stocks
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('ventes_view') %}
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint in ['ventes', 'ajouter_vente', 'importer_ventes_excel', 'voir_vente', 'encaisser_vente', 'supprimer_vente'] %}active{% endif %}" href="{{ url_for('ventes') }}">
+                                <i class="bi bi-cash-stack"></i> Ventes
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('performances_view') %}
                         <li class="nav-item">
                             <a class="nav-link {% if request.endpoint and request.endpoint.startswith('performances') %}active{% endif %}" href="{{ url_for('performances') }}">
                                 <i class="bi bi-graph-up"></i> Performances
                             </a>
                         </li>
-                        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('fournisseurs_manage') %}
                         <li class="nav-item">
                             <a class="nav-link {% if request.endpoint == 'fournisseurs' %}active{% endif %}" href="{{ url_for('fournisseurs') }}">
                                 <i class="bi bi-truck"></i> Fournisseurs
                             </a>
                         </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('commandes_manage') %}
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('ajouter_commande') }}">
                                 <i class="bi bi-plus-circle"></i> Nouvelle commande
                             </a>
                         </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('stocks_manage') %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('ajouter_produit') }}">
+                                <i class="bi bi-box-seam"></i> Nouveau produit
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('ventes_manage') %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="{{ url_for('importer_ventes_excel') }}">
+                                <i class="bi bi-file-earmark-arrow-up"></i> Import ventes
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('users_manage') %}
                         <li class="nav-item">
                             <a class="nav-link {% if request.endpoint and request.endpoint.startswith('admin_utilisateurs') %}active{% endif %}" 
                             href="{{ url_for('admin_utilisateurs') }}">
                                 <i class="bi bi-people"></i> Utilisateurs
                             </a>
                         </li>
+                        {% endif %}
+                        {% if current_user.is_authenticated and can('logs_view') %}
                         <li class="nav-item">
                             <a class="nav-link {% if request.endpoint == 'admin_logs' %}active{% endif %}" 
                             href="{{ url_for('admin_logs') }}">
@@ -268,6 +308,7 @@
                         <li class="nav-item">
                             <a class="nav-link text-white-50" href="#">
                                 <i class="bi bi-person-circle"></i> {{ current_user.username }}
+                                <br><small class="ms-4">{{ role_label(current_user.role) }}</small>
                             </a>
                         </li>
                         <li class="nav-item">

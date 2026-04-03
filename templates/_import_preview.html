@@ -1,0 +1,438 @@
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="preview_token" value="{{ preview.token }}">
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between flex-wrap gap-2 align-items-center">
+            <div>
+                <h5 class="mb-0"><i class="bi bi-sliders"></i> Nettoyage, correction et analyse</h5>
+                <small class="text-muted">{{ preview.original_filename }} | {{ preview.row_count }} lignes | {{ preview.column_count }} colonnes</small>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Ligne d’en-tête</label>
+                    <input type="number" min="1" max="{{ preview.row_count }}" name="header_row" class="form-control" value="{{ preview.header_row }}" required>
+                    <div class="form-text">Suggestion: ligne {{ preview.recommended_header_row }}</div>
+                </div>
+                <div class="col-md-9">
+                    <label class="form-label">Lignes à supprimer avant import</label>
+                    <input type="text" name="rows_to_delete" class="form-control" value="{{ preview.rows_to_delete_value }}" placeholder="Ex: 1,2,5">
+                    <div class="form-text">
+                        Recommandées:
+                        {% if preview.recommended_rows_to_delete %}
+                            {{ preview.recommended_rows_to_delete|join(', ') }}
+                        {% else %}
+                            aucune
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-light mt-3 mb-0">
+                Le tableau brut ci-dessous est modifiable avant réanalyse. Les cellules en erreur affichent directement ce qu’il faut corriger.
+                Utilise aussi les boutons Exclure et Ignorer dans le tableau pour retirer rapidement une ligne ou une colonne.
+            </div>
+
+            {% if preview.mapping_errors %}
+            <div class="alert alert-danger mt-3 mb-0">
+                <strong>Le fichier ne peut pas encore être importé.</strong>
+                <ul class="mb-0 mt-2">
+                    {% for error in preview.mapping_errors %}
+                    <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% else %}
+            <div class="alert alert-success mt-3 mb-0">
+                Aperçu transformé prêt. Corrige les anomalies restantes puis lance l’import.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if preview.analysis_entries %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Anomalies détectées</h5>
+            <small class="text-muted">{{ preview.analysis_issue_count }} point(s) analysé(s)</small>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Ligne</th>
+                            <th>Colonne</th>
+                            <th>Champ</th>
+                            <th>Problème</th>
+                            <th>Action conseillée</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for issue in preview.analysis_entries %}
+                        <tr>
+                            <td>{{ issue.row_number }}</td>
+                            <td>{{ issue.column_label or '—' }}</td>
+                            <td>{{ issue.field_label }}</td>
+                            <td>{{ issue.message }}</td>
+                            <td>{{ issue.suggestion or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-columns-gap"></i> Mapping des colonnes</h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Colonne source</th>
+                            <th>Aperçu valeurs</th>
+                            <th>Action</th>
+                            <th>Suggestion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for column in preview.columns %}
+                        <tr class="{% if column.recommended_delete %}table-warning{% endif %}" data-mapping-row-column="{{ column.index }}">
+                            <td>
+                                <strong>{{ column.header }}</strong>
+                                <br><small class="text-muted">Colonne {{ column.index + 1 }}</small>
+                            </td>
+                            <td>
+                                {% if column.sample_values %}
+                                    {{ column.sample_values|join(' | ') }}
+                                {% else %}
+                                    <span class="text-muted">Aucune valeur détectée</span>
+                                {% endif %}
+                            </td>
+                            <td style="min-width: 240px;">
+                                <select name="column_mapping_{{ column.index }}" class="form-select form-select-sm">
+                                    {% for choice in preview.field_choices %}
+                                    <option value="{{ choice.value }}" {% if column.selected_field == choice.value %}selected{% endif %}>{{ choice.label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                {% if column.suggested_field == '__ignore__' %}
+                                <span class="badge bg-warning text-dark">Supprimer</span>
+                                {% else %}
+                                <span class="badge bg-info text-dark">{{ column.suggested_label }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-xl-7 mb-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-pencil-square"></i> Tableau brut éditable</h5>
+                    {% if preview.raw_preview_is_truncated %}
+                    <small class="text-muted">Aperçu limité aux 25 premières lignes et 15 colonnes</small>
+                    {% endif %}
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0 align-top">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="min-width: 120px;">Ligne</th>
+                                    {% for label in preview.raw_preview_column_labels %}
+                                    {% set visible_column = preview.columns[loop.index0] if loop.index0 < preview.columns|length else none %}
+                                    <th
+                                        style="min-width: 180px;"
+                                        {% if visible_column %}data-preview-column-header="{{ visible_column.index }}"{% endif %}
+                                        class="{% if visible_column and visible_column.selected_field == '__ignore__' %}table-warning{% endif %}"
+                                    >
+                                        <div class="d-flex flex-column gap-1">
+                                            <span>{{ label }}</span>
+                                            {% if visible_column %}
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm {% if visible_column.selected_field == '__ignore__' %}btn-warning{% else %}btn-outline-warning{% endif %} import-toggle-column"
+                                                data-column-index="{{ visible_column.index }}"
+                                                data-restore-value="{% if visible_column.suggested_field != '__ignore__' %}{{ visible_column.suggested_field }}{% endif %}"
+                                            >
+                                                {% if visible_column.selected_field == '__ignore__' %}Réactiver{% else %}Ignorer{% endif %}
+                                            </button>
+                                            {% endif %}
+                                        </div>
+                                    </th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in preview.raw_preview_rows %}
+                                <tr
+                                    data-preview-row="{{ row.row_number }}"
+                                    data-is-header="{% if row.is_header %}1{% else %}0{% endif %}"
+                                    data-is-recommended-deleted="{% if row.is_recommended_deleted %}1{% else %}0{% endif %}"
+                                    data-has-issues="{% if row.issues %}1{% else %}0{% endif %}"
+                                    class="{% if row.is_header %}table-success{% elif row.is_deleted %}table-danger{% elif row.is_recommended_deleted or row.issues %}table-warning{% endif %}"
+                                >
+                                    <td>
+                                        <strong>{{ row.row_number }}</strong>
+                                        {% if row.is_header %}<br><small class="text-success">En-tête</small>{% endif %}
+                                        {% if row.is_deleted and not row.is_header %}<br><small class="text-danger">Supprimée</small>{% endif %}
+                                        {% if row.is_recommended_deleted and not row.is_deleted and not row.is_header %}<br><small class="text-warning">À supprimer</small>{% endif %}
+                                        {% if not row.is_header %}
+                                        <div class="mt-2">
+                                            <button
+                                                type="button"
+                                                class="btn btn-sm {% if row.is_deleted %}btn-danger{% else %}btn-outline-danger{% endif %} import-toggle-row"
+                                                data-row-number="{{ row.row_number }}"
+                                            >
+                                                {% if row.is_deleted %}Réintégrer{% else %}Exclure{% endif %}
+                                            </button>
+                                        </div>
+                                        {% endif %}
+                                        {% for issue in row.issues[:2] %}
+                                        <div class="small text-danger mt-1">{{ issue }}</div>
+                                        {% endfor %}
+                                    </td>
+                                    {% for cell in row.cells %}
+                                    <td
+                                        data-preview-column-cell="{{ cell.column_index }}"
+                                        class="{% if cell.issues %}table-danger{% endif %}"
+                                    >
+                                        <input
+                                            type="text"
+                                            name="{{ cell.input_name }}"
+                                            value="{{ cell.value }}"
+                                            class="form-control form-control-sm {% if cell.issues %}is-invalid{% endif %}"
+                                        >
+                                        {% if cell.header_hint %}
+                                        <div class="small text-info mt-1">{{ cell.header_hint }}</div>
+                                        {% endif %}
+                                        {% for issue in cell.issues[:2] %}
+                                        <div class="small text-danger mt-1">{{ issue }}</div>
+                                        {% endfor %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-5 mb-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-magic"></i> Aperçu transformé</h5>
+                    <small class="text-muted">{{ preview.transformed_count }} ligne(s) prêtes</small>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Ligne source</th>
+                                    {% for header in preview.transformed_headers %}
+                                    <th>{{ header }}</th>
+                                    {% endfor %}
+                                    <th>Analyse</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if preview.transformed_rows %}
+                                    {% for row in preview.transformed_rows %}
+                                    <tr class="{% if row.issues %}table-warning{% endif %}">
+                                        <td>{{ row.source_row_number }}</td>
+                                        {% for cell in row.cells %}
+                                        <td class="{% if cell.issues %}table-danger{% endif %}">
+                                            {{ cell.value or '—' }}
+                                            {% for issue in cell.issues[:1] %}
+                                            <div class="small text-danger mt-1">{{ issue }}</div>
+                                            {% endfor %}
+                                        </td>
+                                        {% endfor %}
+                                        <td>
+                                            {% if row.issues %}
+                                                {% for issue in row.issues[:2] %}
+                                                <div class="small text-danger">{{ issue }}</div>
+                                                {% endfor %}
+                                            {% else %}
+                                            <span class="text-muted">OK</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td colspan="{{ preview.transformed_headers|length + 2 if preview.transformed_headers else 2 }}" class="text-center py-4 text-muted">
+                                        Aucune donnée exploitable après transformation
+                                    </td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2 justify-content-end mb-4">
+        <button type="submit" name="action" value="refresh_preview" class="btn btn-outline-primary">
+            <i class="bi bi-arrow-repeat"></i> Appliquer les modifications et réanalyser
+        </button>
+        <button type="submit" name="action" value="import_cleaned" class="btn btn-primary">
+            <i class="bi bi-cloud-upload"></i> Importer après nettoyage
+        </button>
+    </div>
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const previewTokenInput = document.querySelector('form input[name="preview_token"]');
+    const previewForm = previewTokenInput ? previewTokenInput.form : null;
+    if (!previewForm) {
+        return;
+    }
+
+    const rowsInput = previewForm.querySelector('input[name="rows_to_delete"]');
+    const columnButtons = previewForm.querySelectorAll('.import-toggle-column');
+    const rowButtons = previewForm.querySelectorAll('.import-toggle-row');
+
+    function parseRowsValue() {
+        if (!rowsInput || !rowsInput.value.trim()) {
+            return [];
+        }
+
+        return rowsInput.value
+            .split(/[\s,;]+/)
+            .map(function (value) { return parseInt(value, 10); })
+            .filter(function (value) { return !Number.isNaN(value) && value > 0; })
+            .filter(function (value, index, items) { return items.indexOf(value) === index; })
+            .sort(function (a, b) { return a - b; });
+    }
+
+    function writeRowsValue(rows) {
+        if (rowsInput) {
+            rowsInput.value = rows.join(', ');
+        }
+    }
+
+    function findFirstNonIgnoreOption(select) {
+        return Array.from(select.options).find(function (option) {
+            return option.value !== '__ignore__';
+        });
+    }
+
+    function updateRowVisualState(rowElement, isDeleted, button) {
+        if (!rowElement) {
+            return;
+        }
+
+        rowElement.classList.remove('table-success', 'table-danger', 'table-warning');
+        const isHeader = rowElement.dataset.isHeader === '1';
+        const isRecommendedDeleted = rowElement.dataset.isRecommendedDeleted === '1';
+        const hasIssues = rowElement.dataset.hasIssues === '1';
+
+        if (isHeader) {
+            rowElement.classList.add('table-success');
+        } else if (isDeleted) {
+            rowElement.classList.add('table-danger');
+        } else if (isRecommendedDeleted || hasIssues) {
+            rowElement.classList.add('table-warning');
+        }
+
+        if (button) {
+            button.textContent = isDeleted ? 'Réintégrer' : 'Exclure';
+            button.classList.toggle('btn-danger', isDeleted);
+            button.classList.toggle('btn-outline-danger', !isDeleted);
+        }
+    }
+
+    function updateColumnVisualState(columnIndex, isIgnored, button) {
+        const mappingRow = previewForm.querySelector('[data-mapping-row-column="' + columnIndex + '"]');
+        const headerCell = previewForm.querySelector('[data-preview-column-header="' + columnIndex + '"]');
+        const rawCells = previewForm.querySelectorAll('[data-preview-column-cell="' + columnIndex + '"]');
+
+        if (mappingRow) {
+            mappingRow.classList.toggle('table-warning', isIgnored);
+        }
+        if (headerCell) {
+            headerCell.classList.toggle('table-warning', isIgnored);
+        }
+        rawCells.forEach(function (cell) {
+            const hasError = cell.classList.contains('table-danger');
+            cell.classList.toggle('table-warning', isIgnored && !hasError);
+        });
+
+        if (button) {
+            button.textContent = isIgnored ? 'Réactiver' : 'Ignorer';
+            button.classList.toggle('btn-warning', isIgnored);
+            button.classList.toggle('btn-outline-warning', !isIgnored);
+        }
+    }
+
+    rowButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+            const rowNumber = parseInt(button.dataset.rowNumber, 10);
+            if (Number.isNaN(rowNumber)) {
+                return;
+            }
+
+            const rows = parseRowsValue();
+            const rowIndex = rows.indexOf(rowNumber);
+            const shouldDelete = rowIndex === -1;
+
+            if (shouldDelete) {
+                rows.push(rowNumber);
+            } else {
+                rows.splice(rowIndex, 1);
+            }
+
+            rows.sort(function (a, b) { return a - b; });
+            writeRowsValue(rows);
+            updateRowVisualState(previewForm.querySelector('[data-preview-row="' + rowNumber + '"]'), shouldDelete, button);
+        });
+    });
+
+    columnButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+            const columnIndex = button.dataset.columnIndex;
+            const mappingSelect = previewForm.querySelector('[name="column_mapping_' + columnIndex + '"]');
+            if (!mappingSelect) {
+                return;
+            }
+
+            if (mappingSelect.value === '__ignore__') {
+                const restoreValue = button.dataset.restoreValue;
+                if (restoreValue) {
+                    mappingSelect.value = restoreValue;
+                } else {
+                    const firstNonIgnoreOption = findFirstNonIgnoreOption(mappingSelect);
+                    if (firstNonIgnoreOption) {
+                        mappingSelect.value = firstNonIgnoreOption.value;
+                    }
+                }
+            } else {
+                mappingSelect.value = '__ignore__';
+            }
+
+            updateColumnVisualState(columnIndex, mappingSelect.value === '__ignore__', button);
+        });
+    });
+});
+</script>

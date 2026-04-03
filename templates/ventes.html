@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}Ventes{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="bi bi-cash-stack"></i> Ventes</h1>
+    {% if can('ventes_manage') %}
+    <a href="{{ url_for('importer_ventes_excel') }}" class="btn btn-primary">
+        <i class="bi bi-file-earmark-arrow-up"></i> Importer ventes
+    </a>
+    {% endif %}
+</div>
+
+<div class="alert alert-light border mb-4">
+    Les ventes ne se créent plus manuellement dans l'application. Utilise l'import Excel pour alimenter ce module.
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card card-stats stat-bleu">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Chiffre d'affaires</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_ca) }} FCFA</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card card-stats stat-vert">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Encaissements</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_encaisse) }} FCFA</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card card-stats stat-orange">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Reste à encaisser</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_solde) }} FCFA</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="filters-bar">
+    <form method="GET" class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Recherche</label>
+            <input type="text" name="recherche" class="form-control" value="{{ filtres.recherche }}" placeholder="Référence, client, téléphone">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted">Statut</label>
+            <select name="statut" class="form-select">
+                <option value="">Tous</option>
+                <option value="PAYÉE" {% if filtres.statut == 'PAYÉE' %}selected{% endif %}>Payée</option>
+                <option value="PARTIELLE" {% if filtres.statut == 'PARTIELLE' %}selected{% endif %}>Partielle</option>
+                <option value="EN ATTENTE" {% if filtres.statut == 'EN ATTENTE' %}selected{% endif %}>En attente</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted">Canal</label>
+            <select name="canal" class="form-select">
+                <option value="">Tous</option>
+                <option value="OFFLINE" {% if filtres.canal == 'OFFLINE' %}selected{% endif %}>OFFLINE</option>
+                <option value="ONLINE" {% if filtres.canal == 'ONLINE' %}selected{% endif %}>ONLINE</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted">Type client</label>
+            <select name="type_client" class="form-select">
+                <option value="">Tous</option>
+                <option value="PARTICULIER" {% if filtres.type_client == 'PARTICULIER' %}selected{% endif %}>PARTICULIER</option>
+                <option value="ENTREPRISE" {% if filtres.type_client == 'ENTREPRISE' %}selected{% endif %}>ENTREPRISE</option>
+                <option value="REVENDEUR" {% if filtres.type_client == 'REVENDEUR' %}selected{% endif %}>REVENDEUR</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted">Région</label>
+            <select name="region" class="form-select">
+                <option value="">Toutes</option>
+                {% for region in regions %}
+                <option value="{{ region }}" {% if filtres.region == region %}selected{% endif %}>{{ region }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-1 d-flex align-items-end">
+            <div>
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="bi bi-funnel"></i> Filtrer
+                </button>
+                <a href="{{ url_for('ventes') }}" class="btn btn-secondary">Reset</a>
+            </div>
+        </div>
+    </form>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <span>Résultats filtrés</span>
+        <small class="text-muted">{{ pagination.total if pagination else ventes|length }} vente(s)</small>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Référence</th>
+                        <th>Date</th>
+                        <th>Client</th>
+                        <th>Canal</th>
+                        <th>Segment</th>
+                        <th class="text-end">Total</th>
+                        <th class="text-end">Payé</th>
+                        <th class="text-end">Solde</th>
+                        <th>Statut</th>
+                        <th>Détail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vente in ventes %}
+                    <tr>
+                        <td><strong>{{ vente.reference }}</strong></td>
+                        <td>{{ format_date(vente.date_vente) }}</td>
+                        <td>
+                            {{ vente.client_nom }}
+                            {% if vente.client_telephone %}<br><small class="text-muted">{{ vente.client_telephone }}</small>{% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark">{{ vente.canal_vente or 'N/A' }}</span>
+                        </td>
+                        <td>
+                            <div>{{ vente.type_client or '-' }}</div>
+                            <small class="text-muted">{{ vente.region or '-' }}</small>
+                        </td>
+                        <td class="text-end">{{ "{:,.0f}".format(vente.montant_total or 0) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(vente.montant_paye or 0) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(vente.solde or 0) }} FCFA</td>
+                        <td>
+                            {% if vente.statut_paiement == 'PAYÉE' %}
+                            <span class="badge bg-success">{{ vente.statut_paiement }}</span>
+                            {% elif vente.statut_paiement == 'PARTIELLE' %}
+                            <span class="badge bg-warning text-dark">{{ vente.statut_paiement }}</span>
+                            {% else %}
+                            <span class="badge bg-danger">{{ vente.statut_paiement }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('voir_vente', id=vente.id) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="10" class="text-center py-4 text-muted">Aucune vente importée</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% include "_pagination.html" %}
+{% endblock %}

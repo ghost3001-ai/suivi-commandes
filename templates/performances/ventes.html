@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block title %}Performance Ventes{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2">
+        <i class="bi bi-cash-stack"></i> Performance des ventes
+    </h1>
+    <div class="btn-toolbar">
+        <button onclick="window.print()" class="btn btn-outline-secondary">
+            <i class="bi bi-printer"></i> Imprimer
+        </button>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-bleu shadow-sm">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Ventes totales</small>
+                <h2 class="mb-0 mt-1">{{ total_ventes }}</h2>
+                <div class="text-muted small mt-2">Ticket moyen {{ "{:,.0f}".format(ticket_moyen or 0) }} FCFA</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-vert shadow-sm">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Chiffre d'affaires</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(chiffre_affaires or 0) }} FCFA</h2>
+                <div class="text-muted small mt-2">{{ ventes_payees }} vente(s) payée(s)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-orange shadow-sm">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Encaissements</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_encaisse or 0) }} FCFA</h2>
+                <div class="text-muted small mt-2">Taux {{ "{:,.1f}".format(taux_encaissement or 0) }}%</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats stat-rouge shadow-sm">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Reste à encaisser</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(total_solde or 0) }} FCFA</h2>
+                <div class="text-muted small mt-2">{{ ventes_en_attente }} vente(s) non soldée(s)</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Evolution mensuelle du chiffre d'affaires</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartEvolutionVentes" height="130"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-pie-chart"></i> Répartition par statut</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="chartStatutsVentes" height="220"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-people"></i> Top clients</h5>
+            </div>
+            <div class="card-body">
+                {% if top_clients %}
+                <canvas id="chartTopClients" height="220"></canvas>
+                {% else %}
+                <div class="text-muted text-center py-5">Aucune vente client à analyser</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-box-seam"></i> Top produits vendus</h5>
+            </div>
+            <div class="card-body">
+                {% if top_produits %}
+                <canvas id="chartTopProduitsVendus" height="220"></canvas>
+                {% else %}
+                <div class="text-muted text-center py-5">Aucun produit vendu à analyser</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Ventes récentes</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Référence</th>
+                        <th>Date</th>
+                        <th>Client</th>
+                        <th class="text-end">Total</th>
+                        <th class="text-end">Payé</th>
+                        <th class="text-end">Solde</th>
+                        <th>Statut</th>
+                        <th>Détail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vente in ventes_recentes %}
+                    <tr>
+                        <td><strong>{{ vente.reference }}</strong></td>
+                        <td>{{ format_date(vente.date_vente) }}</td>
+                        <td>{{ vente.client_nom or '-' }}</td>
+                        <td class="text-end">{{ "{:,.0f}".format(vente.montant_total or 0) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(vente.montant_paye or 0) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(vente.solde or 0) }} FCFA</td>
+                        <td>
+                            {% if vente.statut_paiement == 'PAYÉE' %}
+                            <span class="badge bg-success">{{ vente.statut_paiement }}</span>
+                            {% elif vente.statut_paiement == 'PARTIELLE' %}
+                            <span class="badge bg-warning text-dark">{{ vente.statut_paiement }}</span>
+                            {% else %}
+                            <span class="badge bg-danger">{{ vente.statut_paiement }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('voir_vente', id=vente.id) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center py-4 text-muted">Aucune vente enregistrée</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+const evolutionLabels = [{% for point in evolution %}'{{ point.mois }}',{% endfor %}];
+const evolutionData = [{% for point in evolution %}{{ point.total|round(2) }},{% endfor %}];
+const statutsLabels = [{% for item in statuts %}'{{ item.statut }}',{% endfor %}];
+const statutsData = [{% for item in statuts %}{{ item.count }},{% endfor %}];
+
+new Chart(document.getElementById('chartEvolutionVentes').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: evolutionLabels,
+        datasets: [{
+            label: 'Chiffre d\\'affaires (FCFA)',
+            data: evolutionData,
+            borderColor: '#2c3e6d',
+            backgroundColor: 'rgba(44, 62, 109, 0.12)',
+            fill: true,
+            tension: 0.35
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: { callback: value => value.toLocaleString() }
+            }
+        }
+    }
+});
+
+new Chart(document.getElementById('chartStatutsVentes').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+        labels: statutsLabels,
+        datasets: [{
+            data: statutsData,
+            backgroundColor: ['#198754', '#ffc107', '#dc3545']
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true
+    }
+});
+
+{% if top_clients %}
+new Chart(document.getElementById('chartTopClients').getContext('2d'), {
+    type: 'bar',
+    data: {
+        labels: [{% for client in top_clients %}'{{ client.client_nom|replace("'", "\\'") }}',{% endfor %}],
+        datasets: [{
+            label: 'CA (FCFA)',
+            data: [{% for client in top_clients %}{{ client.chiffre_affaires|round(2) }},{% endfor %}],
+            backgroundColor: '#198754',
+            borderRadius: 8
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: true,
+        scales: {
+            x: {
+                beginAtZero: true,
+                ticks: { callback: value => value.toLocaleString() }
+            }
+        }
+    }
+});
+{% endif %}
+
+{% if top_produits %}
+new Chart(document.getElementById('chartTopProduitsVendus').getContext('2d'), {
+    type: 'bar',
+    data: {
+        labels: [{% for produit in top_produits %}'{{ produit.nom|replace("'", "\\'") }}',{% endfor %}],
+        datasets: [{
+            label: 'CA (FCFA)',
+            data: [{% for produit in top_produits %}{{ produit.chiffre_affaires|round(2) }},{% endfor %}],
+            backgroundColor: '#dc3545',
+            borderRadius: 8
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: true,
+        scales: {
+            x: {
+                beginAtZero: true,
+                ticks: { callback: value => value.toLocaleString() }
+            }
+        }
+    }
+});
+{% endif %}
+</script>
+{% endblock %}

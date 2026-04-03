@@ -45,7 +45,7 @@
                     
                     <div class="mb-3">
                         <label class="form-label">Rôle</label>
-                        <input type="text" class="form-control" value="{{ 'Administrateur' if utilisateur.role == 'admin' else 'Spectateur' }}" disabled>
+                        <input type="text" class="form-control" value="{{ role_label(utilisateur.role) }}" disabled>
                     </div>
                     
                     <button type="submit" class="btn btn-primary">

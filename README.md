@@ -18,10 +18,13 @@ source venv/bin/activate
 # 2. Installer
 pip install -r requirements.txt
 
-# 3. Initialiser
+# 3. Outils qualité / migrations (recommandé)
+pip install -r requirements-dev.txt
+
+# 4. Initialiser
 python init_app.py
 
-# 4. Lancer
+# 5. Lancer
 python app.py
 ```
 
@@ -81,7 +84,7 @@ cp .env.example .env
 
 Éditer `.env`:
 ```
-FLASK_ENV=production
+APP_ENV=production
 SECRET_KEY=changez-moi-absolument-en-production
 DATABASE_URL=postgresql://user:pass@host/db  # Optionnel (PostgreSQL)
 MAIL_SERVER=smtp.gmail.com
@@ -144,7 +147,7 @@ MAIL_PASSWORD=app-password
 docker build -t achat:latest .
 docker run -p 5000:5000 \
   -e SECRET_KEY=your-key \
-  -e FLASK_ENV=production \
+  -e APP_ENV=production \
   -e ADMIN_PASSWORD=change-me \
   -e DATABASE_URL=postgresql://user:pass@host:5432/dbname \
   achat:latest
@@ -156,8 +159,30 @@ docker run -p 5000:5000 \
 python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
+alembic upgrade head
 python init_app.py
 gunicorn wsgi:app --workers 4
+```
+
+### Migrations de schéma
+```bash
+# Base neuve
+alembic upgrade head
+
+# Base existante déjà créée hors Alembic
+alembic stamp head
+
+# Nouveau changement de schéma
+alembic revision --autogenerate -m "ajout champs ventes"
+alembic upgrade head
+```
+
+### Tests
+```bash
+pip install -r requirements-dev.txt
+pytest
+python smoke_test.py
 ```
 
 ---
@@ -192,6 +217,10 @@ python init_app.py
 
 5. **Sauvegarder régulièrement la base de données**
 
+6. **Superviser les endpoints**
+   - `GET /healthz`
+   - `GET /readyz`
+
 ---
 
 ## 📞 Dépannage
@@ -203,6 +232,15 @@ python init_app.py
 | SECRET_KEY error | Créer `.env` avec SECRET_KEY |
 | Port 5000 déjà utilisé | `python app.py --port 5001` |
 | Import Excel échoue | Vérifier format .xlsx et colonnes |
+| Alembic échoue sur une base existante | `alembic stamp head` |
+
+---
+
+## 📘 Exploitation
+
+Checklist et runbook détaillés :
+
+- [PRODUCTION_CHECKLIST.md](/home/ghost/Afrilux_Smart/Achat/docs/PRODUCTION_CHECKLIST.md)
 
 ---
 

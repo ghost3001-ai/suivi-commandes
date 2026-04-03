@@ -100,12 +100,51 @@
                            value="{{ commande.date_livraison.strftime('%Y-%m-%d') if commande and commande.date_livraison else '' }}">
                 </div>
                 <div class="col-md-4 mb-3">
+                    <label class="form-label">Date réception réelle</label>
+                    <input type="date" name="date_reception" class="form-control" 
+                           value="{{ commande.date_reception.strftime('%Y-%m-%d') if commande and commande.date_reception else '' }}">
+                </div>
+                <div class="col-md-4 mb-3">
                     <label class="form-label">N° Bon livraison</label>
                     <input type="text" name="bon_livraison" class="form-control" value="{{ commande.bon_livraison if commande else '' }}">
                 </div>
+            </div>
+
+            <div class="row">
                 <div class="col-md-4 mb-3">
                     <label class="form-label">N° Facture</label>
                     <input type="text" name="facture" class="form-control" value="{{ commande.facture if commande else '' }}">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Prix de référence marché (FCFA)</label>
+                    <input type="number" step="0.01" name="prix_reference_marche" class="form-control" value="{{ commande.prix_reference_marche if commande else 0 }}">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Note performance fournisseur /5</label>
+                    <input type="number" step="0.1" min="0" max="5" name="note_fournisseur" class="form-control" value="{{ commande.note_fournisseur if commande and commande.note_fournisseur is not none else '' }}">
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Note service après-vente /5</label>
+                    <input type="number" step="0.1" min="0" max="5" name="note_service" class="form-control" value="{{ commande.note_service if commande and commande.note_service is not none else '' }}">
+                </div>
+                <div class="col-md-4 mb-3 d-flex align-items-end">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="commande_conforme" id="commande_conforme" {% if not commande or commande.commande_conforme %}checked{% endif %}>
+                        <label class="form-check-label" for="commande_conforme">
+                            Commande conforme
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3 d-flex align-items-end">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="rupture_fournisseur" id="rupture_fournisseur" {% if commande and commande.rupture_fournisseur %}checked{% endif %}>
+                        <label class="form-check-label" for="rupture_fournisseur">
+                            Rupture / livraison incomplète
+                        </label>
+                    </div>
                 </div>
             </div>
             

@@ -8,17 +8,17 @@
         <i class="bi bi-list-check"></i> Commandes
     </h1>
     <div class="btn-toolbar">
-        {% if current_user.is_authenticated and current_user.role == 'admin' %}
-        <form action="{{ url_for('importer_excel') }}" method="POST" enctype="multipart/form-data" class="d-inline me-2">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="file" name="fichier" accept=".xlsx,.xls,.csv" class="d-none" id="importFile">
-            <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('importFile').click()">
-                <i class="bi bi-upload"></i> Importer
-            </button>
-        </form>
+        {% if can('commandes_manage') %}
+        <a href="{{ url_for('importer_excel') }}" class="btn btn-outline-secondary me-2">
+            <i class="bi bi-upload"></i> Importer
+        </a>
+        {% endif %}
+        {% if can('commandes_view') %}
         <a href="{{ url_for('exporter_excel') }}" class="btn btn-success me-2">
             <i class="bi bi-file-excel"></i> Exporter
         </a>
+        {% endif %}
+        {% if can('commandes_manage') %}
         <a href="{{ url_for('ajouter_commande') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg"></i> Nouvelle
         </a>
@@ -81,6 +81,10 @@
 
 <!-- Tableau des commandes -->
 <div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <span>Résultats filtrés</span>
+        <small class="text-muted">{{ pagination.total if pagination else commandes|length }} résultat(s)</small>
+    </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover mb-0">
@@ -95,7 +99,7 @@
                         <th>Solde</th>
                         <th>Statut</th>
                         <th>Délai</th>
-                        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+                        {% if can('commandes_manage') %}
                         <th>Actions</th>
                         {% endif %}
                     </tr>
@@ -122,7 +126,7 @@
                             <span class="text-muted">-</span>
                             {% endif %}
                         </td>
-                        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+                        {% if can('commandes_manage') %}
                         <td>
                             <div class="btn-group btn-group-sm">
                                 <a href="{{ url_for('modifier_commande', id=c.id) }}" class="btn btn-outline-primary">
@@ -140,7 +144,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="{% if current_user.is_authenticated and current_user.role == 'admin' %}10{% else %}9{% endif %}" class="text-center py-4 text-muted">
+                        <td colspan="{% if can('commandes_manage') %}10{% else %}9{% endif %}" class="text-center py-4 text-muted">
                             <i class="bi bi-inbox fs-1"></i><br>
                             Aucune commande trouvée
                         </td>
@@ -152,16 +156,6 @@
     </div>
 </div>
 
-<script>
-    document.getElementById('importFile')?.addEventListener('change', function(e) {
-        if (e.target.files.length > 0) {
-            const form = e.target.closest('form');
-            const submitBtn = document.createElement('button');
-            submitBtn.type = 'submit';
-            submitBtn.style.display = 'none';
-            form.appendChild(submitBtn);
-            submitBtn.click();
-        }
-    });
-</script>
+{% include "_pagination.html" %}
+
 {% endblock %}

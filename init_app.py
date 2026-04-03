@@ -47,7 +47,7 @@ print()
 print("Commandes utiles:")
 print("  Démarrage:       python app.py")
 print("  Production:      gunicorn wsgi:app")
-if os.environ.get('FLASK_ENV') == 'production':
+if os.environ.get('APP_ENV') == 'production' or os.environ.get('FLASK_ENV') == 'production':
     print("  Admin initial:   ADMIN_USERNAME / ADMIN_PASSWORD")
 else:
     print("  Credentials:     admin / admin123")

@@ -7,9 +7,9 @@ services:
     region: frankfurt
     buildCommand: pip install -r requirements.txt
     startCommand: python init_app.py && gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --worker-class sync --access-logfile - --error-logfile -
-    healthCheckPath: /login
+    healthCheckPath: /healthz
     envVars:
-      - key: FLASK_ENV
+      - key: APP_ENV
         value: production
       - key: SECRET_KEY
         generateValue: true

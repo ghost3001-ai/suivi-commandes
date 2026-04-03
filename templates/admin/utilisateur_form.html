@@ -46,8 +46,17 @@
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Rôle *</label>
                     <select name="role" class="form-select" required>
+                        <option value="achats" {% if utilisateur and utilisateur.role == 'achats' %}selected{% endif %}>
+                            Achats (gestion des commandes uniquement)
+                        </option>
+                        <option value="gestionnaire_stock" {% if utilisateur and utilisateur.role == 'gestionnaire_stock' %}selected{% endif %}>
+                            Gestionnaire de stock (stocks + lecture commandes)
+                        </option>
+                        <option value="ingenieur" {% if utilisateur and utilisateur.role == 'ingenieur' %}selected{% endif %}>
+                            Ingénieur (lecture commandes, stocks, performances)
+                        </option>
                         <option value="spectateur" {% if utilisateur and utilisateur.role == 'spectateur' %}selected{% endif %}>
-                            Spectateur (lecture seule)
+                            Spectateur (lecture seule étendue)
                         </option>
                         <option value="admin" {% if utilisateur and utilisateur.role == 'admin' %}selected{% endif %}>
                             Administrateur (gestion complète)

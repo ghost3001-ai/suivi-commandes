@@ -80,7 +80,7 @@
 
 <!-- Navigation Cards -->
 <div class="row mb-4">
-    <div class="col-md-4 mb-3">
+    <div class="col-md-3 mb-3">
         <a href="{{ url_for('performances_acheteurs') }}" class="text-decoration-none">
             <div class="card shadow-sm h-100 text-center hover-card">
                 <div class="card-body py-4">
@@ -91,7 +91,7 @@
             </div>
         </a>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-3 mb-3">
         <a href="{{ url_for('performances_fournisseurs') }}" class="text-decoration-none">
             <div class="card shadow-sm h-100 text-center hover-card">
                 <div class="card-body py-4">
@@ -102,13 +102,24 @@
             </div>
         </a>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-3 mb-3">
         <a href="{{ url_for('performances_produits') }}" class="text-decoration-none">
             <div class="card shadow-sm h-100 text-center hover-card">
                 <div class="card-body py-4">
                     <i class="bi bi-box-seam fs-1 text-warning"></i>
                     <h4 class="mt-2">Produits</h4>
                     <p class="text-muted">Produits les plus achetés, tendances d'achat</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3 mb-3">
+        <a href="{{ url_for('performances_ventes') }}" class="text-decoration-none">
+            <div class="card shadow-sm h-100 text-center hover-card">
+                <div class="card-body py-4">
+                    <i class="bi bi-cash-stack fs-1 text-danger"></i>
+                    <h4 class="mt-2">Ventes</h4>
+                    <p class="text-muted">Chiffre d'affaires, encaissements, clients et produits vendus</p>
                 </div>
             </div>
         </a>

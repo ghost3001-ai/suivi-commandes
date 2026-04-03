@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Import stock{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="bi bi-file-earmark-spreadsheet"></i> Import du stock</h1>
+    <a href="{{ url_for('stocks') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Retour
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-4 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-upload"></i> Charger un fichier</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="upload_preview">
+
+                    <div class="mb-3">
+                        <label class="form-label">Fichier Excel ou CSV</label>
+                        <input type="file" name="fichier" class="form-control" accept=".xlsx,.xls,.csv" required>
+                    </div>
+
+                    <div class="alert alert-light mb-3">
+                        L’import se fait en 2 étapes:
+                        aperçu brut, nettoyage/mapping, puis chargement final.
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> Analyser le fichier
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-table"></i> Format attendu</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">Colonnes minimales requises après nettoyage.</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Colonne</th>
+                                <th>Obligatoire</th>
+                                <th>Exemple</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Code produit ou Produit</td><td>Oui</td><td>TV-55 / Téléviseur 55"</td></tr>
+                            <tr><td>Stock actuel</td><td>Oui</td><td>18</td></tr>
+                            <tr><td>Famille / Catégorie</td><td>Non</td><td>30 - Électronique / 301 - Téléviseurs</td></tr>
+                            <tr><td>Prix unitaire</td><td>Non</td><td>175000</td></tr>
+                            <tr><td>Stock minimum</td><td>Non</td><td>3</td></tr>
+                            <tr><td>Unité</td><td>Non</td><td>pièce</td></tr>
+                            <tr><td>Actif</td><td>Non</td><td>Oui</td></tr>
+                            <tr><td>Motif</td><td>Non</td><td>Inventaire avril</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="alert alert-warning mb-0">
+                    L’import crée le produit s’il n’existe pas encore, puis ajuste le stock avec traçabilité dans les mouvements.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if preview %}
+{% include "_import_preview.html" %}
+{% endif %}
+{% endblock %}

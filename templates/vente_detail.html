@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Vente {{ vente.reference }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="bi bi-receipt"></i> Vente {{ vente.reference }}</h1>
+    <div>
+        <a href="{{ url_for('ventes') }}" class="btn btn-secondary me-2">
+            <i class="bi bi-arrow-left"></i> Retour
+        </a>
+        {% if can('ventes_manage') %}
+        <form method="POST" action="{{ url_for('supprimer_vente', id=vente.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Supprimer cette vente et rétablir le stock ?')">
+                <i class="bi bi-trash"></i> Supprimer
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Client</small>
+                <h5 class="mt-2 mb-1">{{ vente.client_nom }}</h5>
+                <div class="text-muted">{{ vente.client_telephone or '-' }}</div>
+                <div class="text-muted mt-2">{{ vente.type_client or '-' }} | {{ vente.region or '-' }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Totaux</small>
+                <div class="mt-2">Total: <strong>{{ "{:,.0f}".format(vente.montant_total or 0) }} FCFA</strong></div>
+                <div>Payé: <strong>{{ "{:,.0f}".format(vente.montant_paye or 0) }} FCFA</strong></div>
+                <div>Solde: <strong>{{ "{:,.0f}".format(vente.solde or 0) }} FCFA</strong></div>
+                <div>Retour: <strong>{{ "{:,.0f}".format(vente.montant_retour or 0) }} FCFA</strong></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Statut</small>
+                <div class="mt-2">
+                    {% if vente.statut_paiement == 'PAYÉE' %}
+                    <span class="badge bg-success">{{ vente.statut_paiement }}</span>
+                    {% elif vente.statut_paiement == 'PARTIELLE' %}
+                    <span class="badge bg-warning text-dark">{{ vente.statut_paiement }}</span>
+                    {% else %}
+                    <span class="badge bg-danger">{{ vente.statut_paiement }}</span>
+                    {% endif %}
+                </div>
+                <div class="text-muted mt-2">Date: {{ format_date(vente.date_vente) }}</div>
+                <div class="text-muted">Canal: {{ vente.canal_vente or '-' }}</div>
+                {% if vente.retour_effectue or (vente.montant_retour or 0) > 0 %}
+                <div class="badge bg-warning text-dark mt-2">Retour client enregistré</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-list-ul"></i> Lignes de vente</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Produit</th>
+                        <th class="text-end">Quantité</th>
+                        <th class="text-end">Prix unitaire</th>
+                        <th class="text-end">Montant</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ligne in vente.lignes %}
+                    <tr>
+                        <td>{{ ligne.produit.nom }}</td>
+                        <td class="text-end">{{ "{:,.2f}".format(ligne.quantite or 0) }}</td>
+                        <td class="text-end">{{ "{:,.0f}".format(ligne.prix_unitaire or 0) }} FCFA</td>
+                        <td class="text-end">{{ "{:,.0f}".format(ligne.montant_total or 0) }} FCFA</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% if vente.commentaire %}
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-chat-left-text"></i> Commentaire</h5>
+    </div>
+    <div class="card-body">{{ vente.commentaire }}</div>
+</div>
+{% endif %}
+
+{% if can('ventes_manage') and vente.solde > 0 %}
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-wallet2"></i> Enregistrer un paiement</h5>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('encaisser_vente', id=vente.id) }}" class="row g-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-4">
+                <label class="form-label">Montant</label>
+                <input type="number" name="montant" class="form-control" step="0.01" min="0.01" max="{{ vente.solde }}" required>
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-cash"></i> Enregistrer
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
