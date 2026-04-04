@@ -4598,7 +4598,10 @@ def fournisseurs():
     denied_response = require_permission('fournisseurs_manage')
     if denied_response:
         return denied_response
-    
+
+    if Fournisseur.query.count() == 0:
+        ensure_supplier_reference_data()
+
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
     return render_template('admin/fournisseurs.html', fournisseurs=fournisseurs)
 
@@ -5867,6 +5870,37 @@ def init_db():
                 print(f"Utilisateur admin créé: {admin_username}")
             else:
                 print(f"Utilisateur admin créé: {admin_username} / {admin_password}")
+
+        ensure_supplier_reference_data()
+
+
+def ensure_supplier_reference_data(force=False):
+    """Synchronise les fournisseurs depuis le classeur source si la base est vide."""
+    if app.config.get('TESTING') and not force:
+        return 0
+
+    workbook_path = app.config.get('SUPPLIER_SOURCE_WORKBOOK_FILE')
+    if not workbook_path or not os.path.exists(workbook_path):
+        return 0
+
+    if not force and Fournisseur.query.count() > 0:
+        return 0
+
+    try:
+        from import_fournisseurs_workbook import import_suppliers
+
+        _, created, updated = import_suppliers(workbook_path, replace_existing=False)
+        if created or updated:
+            print(
+                f"Fournisseurs synchronisés depuis le classeur source: "
+                f"{created} créés, {updated} mis à jour"
+            )
+        return created + updated
+    except Exception as exc:
+        if app.config.get('IS_PRODUCTION'):
+            print(f"Import fournisseurs ignoré: {exc}")
+            return 0
+        raise
 
 # ==================== ROUTES PERFORMANCES ====================
 

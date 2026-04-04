@@ -267,6 +267,34 @@ def test_catalog_uses_repo_root_workbook_by_default(app_module):
     assert os.path.basename(catalog_path) == 'Projet Suivi Commande ASS.xlsx'
 
 
+def test_supplier_reference_bootstrap_uses_source_workbook(app_module, monkeypatch, tmp_path):
+    workbook_path = tmp_path / 'fournisseurs.xlsx'
+    workbook_path.write_bytes(b'test')
+
+    app_module.app.config['SUPPLIER_SOURCE_WORKBOOK_FILE'] = str(workbook_path)
+
+    import import_fournisseurs_workbook as supplier_importer
+
+    def fake_import_suppliers(path, replace_existing=False):
+        assert path == str(workbook_path)
+        assert replace_existing is False
+        fournisseur = app_module.Fournisseur(nom='Fournisseur bootstrap')
+        app_module.db.session.add(fournisseur)
+        app_module.db.session.commit()
+        return ([{'nom': 'Fournisseur bootstrap'}], 1, 0)
+
+    monkeypatch.setattr(supplier_importer, 'import_suppliers', fake_import_suppliers)
+
+    with app_module.app.app_context():
+        app_module.db.session.query(app_module.Fournisseur).delete()
+        app_module.db.session.commit()
+
+        imported = app_module.ensure_supplier_reference_data(force=True)
+
+        assert imported == 1
+        assert app_module.Fournisseur.query.count() == 1
+
+
 def test_manual_stock_movement_supports_multiple_products(authenticated_client, app_module):
     with app_module.app.app_context():
         produit_a = app_module.Produit(

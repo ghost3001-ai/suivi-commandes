@@ -64,6 +64,10 @@ class Config:
     # Configuration pour l'upload de fichiers
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+    SUPPLIER_SOURCE_WORKBOOK_FILE = (
+        os.environ.get('SUPPLIER_SOURCE_WORKBOOK_FILE')
+        or (SOURCE_WORKBOOK_PATH if os.path.exists(SOURCE_WORKBOOK_PATH) else None)
+    )
     CATEGORY_CATALOG_FILE = (
         os.environ.get('CATEGORY_CATALOG_FILE')
         or (SOURCE_WORKBOOK_PATH if os.path.exists(SOURCE_WORKBOOK_PATH) else os.path.join(BASE_DIR, 'data', 'categorie_ass1.xlsx'))
