@@ -1,3 +1,4 @@
+import os
 from html import unescape
 
 from datetime import date, timedelta
@@ -256,6 +257,14 @@ def test_product_form_preloads_catalog_categories(authenticated_client, app_modu
     assert 'Les 49 catégories sont préchargées.' in body
     assert expected_category in body
     assert body.count('<option value="') >= expected_total
+
+
+def test_catalog_uses_repo_root_workbook_by_default(app_module):
+    catalog_path = app_module.app.config['CATEGORY_CATALOG_FILE']
+    expected_path = os.path.join(app_module.app.root_path, 'Projet Suivi Commande ASS.xlsx')
+
+    assert catalog_path == expected_path
+    assert os.path.basename(catalog_path) == 'Projet Suivi Commande ASS.xlsx'
 
 
 def test_manual_stock_movement_supports_multiple_products(authenticated_client, app_module):

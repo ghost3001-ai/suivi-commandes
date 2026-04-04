@@ -16,7 +16,7 @@ SQLITE_DB_PATH = os.path.join(INSTANCE_PATH, 'commandes.db').replace('\\', '/')
 os.makedirs(os.path.join(BASE_DIR, 'uploads'), exist_ok=True)
 os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
 
-SOURCE_WORKBOOK_PATH = os.path.join(os.path.dirname(BASE_DIR), 'Projet Suivi Commande ASS.xlsx')
+SOURCE_WORKBOOK_PATH = os.path.join(BASE_DIR, 'Projet Suivi Commande ASS.xlsx')
 
 
 def get_database_url():
