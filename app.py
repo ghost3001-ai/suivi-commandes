@@ -43,6 +43,7 @@ app = Flask(__name__)
 app.config.from_object(Config)
 dashboard_scheduler = None
 database_bootstrap_uri = None
+synchronized_supplier_reference_key = None
 scheduler_lock_handle = None
 
 ROLE_ADMIN = 'admin'
@@ -4371,6 +4372,7 @@ def commandes():
     # Récupération des options pour les filtres
     entites = db.session.query(Commande.entite).distinct().all()
     acheteurs = db.session.query(Commande.acheteur).distinct().all()
+    ensure_supplier_reference_data()
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
     
     return render_template('commandes.html',
@@ -4393,7 +4395,8 @@ def ajouter_commande():
     denied_response = require_permission('commandes_manage', 'commandes')
     if denied_response:
         return denied_response
-    
+
+    ensure_supplier_reference_data()
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
     
     if request.method == 'POST':
@@ -4474,7 +4477,8 @@ def modifier_commande(id):
     denied_response = require_permission('commandes_manage', 'commandes')
     if denied_response:
         return denied_response
-    
+
+    ensure_supplier_reference_data()
     commande = Commande.query.get_or_404(id)
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
     
@@ -4599,8 +4603,7 @@ def fournisseurs():
     if denied_response:
         return denied_response
 
-    if Fournisseur.query.count() == 0:
-        ensure_supplier_reference_data()
+    ensure_supplier_reference_data()
 
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
     return render_template('admin/fournisseurs.html', fournisseurs=fournisseurs)
@@ -5875,7 +5878,9 @@ def init_db():
 
 
 def ensure_supplier_reference_data(force=False):
-    """Synchronise les fournisseurs depuis le classeur source si la base est vide."""
+    """Synchronise les fournisseurs depuis le classeur source une fois par base."""
+    global synchronized_supplier_reference_key
+
     if app.config.get('TESTING') and not force:
         return 0
 
@@ -5883,17 +5888,22 @@ def ensure_supplier_reference_data(force=False):
     if not workbook_path or not os.path.exists(workbook_path):
         return 0
 
-    if not force and Fournisseur.query.count() > 0:
+    sync_key = f"{app.config.get('SQLALCHEMY_DATABASE_URI')}::{os.path.abspath(workbook_path)}"
+    if not force and synchronized_supplier_reference_key == sync_key:
         return 0
 
     try:
         from import_fournisseurs_workbook import import_suppliers
 
+        before_count = Fournisseur.query.count()
         _, created, updated = import_suppliers(workbook_path, replace_existing=False)
+        synchronized_supplier_reference_key = sync_key
+        after_count = Fournisseur.query.count()
         if created or updated:
             print(
                 f"Fournisseurs synchronisés depuis le classeur source: "
-                f"{created} créés, {updated} mis à jour"
+                f"{created} créés, {updated} mis à jour "
+                f"({before_count} -> {after_count})"
             )
         return created + updated
     except Exception as exc:

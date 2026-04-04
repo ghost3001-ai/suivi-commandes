@@ -272,10 +272,14 @@ def test_supplier_reference_bootstrap_uses_source_workbook(app_module, monkeypat
     workbook_path.write_bytes(b'test')
 
     app_module.app.config['SUPPLIER_SOURCE_WORKBOOK_FILE'] = str(workbook_path)
+    app_module.app.config['TESTING'] = False
+    app_module.synchronized_supplier_reference_key = None
 
     import import_fournisseurs_workbook as supplier_importer
+    calls = []
 
     def fake_import_suppliers(path, replace_existing=False):
+        calls.append((path, replace_existing))
         assert path == str(workbook_path)
         assert replace_existing is False
         fournisseur = app_module.Fournisseur(nom='Fournisseur bootstrap')
@@ -286,13 +290,16 @@ def test_supplier_reference_bootstrap_uses_source_workbook(app_module, monkeypat
     monkeypatch.setattr(supplier_importer, 'import_suppliers', fake_import_suppliers)
 
     with app_module.app.app_context():
-        app_module.db.session.query(app_module.Fournisseur).delete()
+        app_module.db.session.add(app_module.Fournisseur(nom='Fournisseur déjà présent'))
         app_module.db.session.commit()
 
-        imported = app_module.ensure_supplier_reference_data(force=True)
+        imported = app_module.ensure_supplier_reference_data()
+        imported_again = app_module.ensure_supplier_reference_data()
 
         assert imported == 1
-        assert app_module.Fournisseur.query.count() == 1
+        assert imported_again == 0
+        assert len(calls) == 1
+        assert app_module.Fournisseur.query.count() == 2
 
 
 def test_manual_stock_movement_supports_multiple_products(authenticated_client, app_module):
