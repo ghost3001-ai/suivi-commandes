@@ -67,6 +67,21 @@ ROLE_HOME_ENDPOINTS = {
     ROLE_INGENIEUR: 'commandes',
 }
 
+SERVICE_DEMANDEUR_OPTIONS = [
+    'Achat',
+    'Marketing',
+    'Direction',
+    'Ingenierie',
+    'Commerciale',
+    'Froid & climatisation',
+    'Courant fort',
+    'Courant faible',
+    'Logistique',
+    'Magasin',
+    'Finance & Comptabilité',
+    'IT & SAV',
+]
+
 ROLE_PERMISSIONS = {
     ROLE_ADMIN: {
         'dashboard_view',
@@ -448,6 +463,15 @@ def valider_note_fournisseur(valeur, champ='Note'):
         raise ValueError(f"{champ} doit être comprise entre 0 et 5")
     return note
 
+def valider_service_demandeur(valeur):
+    """Valide le service demandeur d'une commande."""
+    service = (valeur or '').strip()
+    if not service:
+        return None
+    if service not in SERVICE_DEMANDEUR_OPTIONS:
+        raise ValueError('Service demandeur invalide')
+    return service
+
 
 def get_product_category_catalog():
     """Retourne le référentiel familles/catégories des produits."""
@@ -508,7 +532,17 @@ def get_product_catalog_context(form_values):
     family_label = form_values.get('famille') or ''
     category_label = form_values.get('categorie') or ''
 
-    available_categories = list(catalog['categories_by_family'].get(family_label, []))
+    if family_label:
+        available_categories = list(catalog['categories_by_family'].get(family_label, []))
+    else:
+        available_categories = []
+        seen_categories = set()
+        for family_name in catalog.get('families', []):
+            for category_name in catalog['categories_by_family'].get(family_name, []):
+                if category_name not in seen_categories:
+                    seen_categories.add(category_name)
+                    available_categories.append(category_name)
+
     if category_label and category_label not in available_categories:
         available_categories.append(category_label)
 
@@ -2074,6 +2108,28 @@ def appliquer_mouvement_stock(produit, variation, type_mouvement, motif, vente=N
     )
     db.session.add(mouvement)
     return mouvement
+
+def get_stock_movement_form_lines(form=None):
+    """Construit les lignes du formulaire de mouvement multi-produits."""
+    if form is None:
+        return [{'produit_id': '', 'quantite': ''}]
+
+    produit_ids = form.getlist('produit_id[]')
+    quantites = form.getlist('quantite[]')
+
+    if not produit_ids and form.get('produit_id'):
+        produit_ids = [form.get('produit_id')]
+    if not quantites and form.get('quantite'):
+        quantites = [form.get('quantite')]
+
+    line_count = max(len(produit_ids), len(quantites), 1)
+    lines = []
+    for index in range(line_count):
+        lines.append({
+            'produit_id': (produit_ids[index] if index < len(produit_ids) else '') or '',
+            'quantite': (quantites[index] if index < len(quantites) else '') or '',
+        })
+    return lines
 
 def get_month_series(months=12):
     """Retourne une liste de premiers jours de mois, du plus ancien au plus récent."""
@@ -3791,9 +3847,9 @@ def get_low_performing_products(filters, limit=5):
         Produit.categorie,
         Produit.stock_actuel,
         Produit.stock_minimum,
-        func.coalesce(line_subquery.c.quantite_vendue, 0),
-        func.coalesce(line_subquery.c.chiffre_affaires, 0),
-        func.coalesce(line_subquery.c.nb_ventes, 0),
+        func.coalesce(line_subquery.c.quantite_vendue, 0).label('quantite_vendue'),
+        func.coalesce(line_subquery.c.chiffre_affaires, 0).label('chiffre_affaires'),
+        func.coalesce(line_subquery.c.nb_ventes, 0).label('nb_ventes'),
     ).outerjoin(line_subquery, line_subquery.c.produit_id == Produit.id)\
      .filter(Produit.actif.is_(True))
 
@@ -3821,9 +3877,9 @@ def get_low_performing_products(filters, limit=5):
             'categorie': row.categorie or 'Non classée',
             'stock_actuel': float(row.stock_actuel or 0),
             'stock_minimum': float(row.stock_minimum or 0),
-            'quantite_vendue': float(row[5] or 0),
-            'chiffre_affaires': float(row[6] or 0),
-            'nb_ventes': int(row[7] or 0),
+            'quantite_vendue': float(row.quantite_vendue or 0),
+            'chiffre_affaires': float(row.chiffre_affaires or 0),
+            'nb_ventes': int(row.nb_ventes or 0),
         })
         if len(results) >= limit:
             break
@@ -4348,6 +4404,7 @@ def ajouter_commande():
             prix_reference_marche = valider_montant(request.form.get('prix_reference_marche', 0))
             note_fournisseur = valider_note_fournisseur(request.form.get('note_fournisseur'), 'Note performance')
             note_service = valider_note_fournisseur(request.form.get('note_service'), 'Note SAV')
+            service_demandeur = valider_service_demandeur(request.form.get('service_demandeur'))
             
             # Vérifier que avance <= montant
             if avance > montant:
@@ -4355,6 +4412,7 @@ def ajouter_commande():
                 return render_template('admin/commande_form.html', 
                                      fournisseurs=fournisseurs, 
                                      commande=None,
+                                     services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
                                      titre="Ajouter une commande")
             
             commande = Commande(
@@ -4362,7 +4420,7 @@ def ajouter_commande():
                 date_cde=datetime.strptime(request.form['date_cde'], '%Y-%m-%d').date() if request.form.get('date_cde') else None,
                 entite=request.form.get('entite'),
                 demandeur=request.form.get('demandeur'),
-                service_demandeur=request.form.get('service_demandeur'),
+                service_demandeur=service_demandeur,
                 acheteur=request.form.get('acheteur'),
                 fournisseur_id=int(request.form['fournisseur_id']) if request.form.get('fournisseur_id') else None,
                 affaire=request.form.get('affaire'),
@@ -4407,6 +4465,7 @@ def ajouter_commande():
     return render_template('admin/commande_form.html', 
                          fournisseurs=fournisseurs, 
                          commande=None,
+                         services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
                          titre="Ajouter une commande")
 
 @app.route('/commande/modifier/<int:id>', methods=['GET', 'POST'])
@@ -4427,6 +4486,7 @@ def modifier_commande(id):
             prix_reference_marche = valider_montant(request.form.get('prix_reference_marche', 0))
             note_fournisseur = valider_note_fournisseur(request.form.get('note_fournisseur'), 'Note performance')
             note_service = valider_note_fournisseur(request.form.get('note_service'), 'Note SAV')
+            service_demandeur = valider_service_demandeur(request.form.get('service_demandeur'))
             
             # Vérifier que avance <= montant
             if avance > montant:
@@ -4434,13 +4494,14 @@ def modifier_commande(id):
                 return render_template('admin/commande_form.html', 
                                      commande=commande, 
                                      fournisseurs=fournisseurs,
+                                     services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
                                      titre="Modifier la commande")
             
             commande.nr = request.form.get('nr', 0)
             commande.date_cde = datetime.strptime(request.form['date_cde'], '%Y-%m-%d').date() if request.form.get('date_cde') else None
             commande.entite = request.form.get('entite')
             commande.demandeur = request.form.get('demandeur')
-            commande.service_demandeur = request.form.get('service_demandeur')
+            commande.service_demandeur = service_demandeur
             commande.acheteur = request.form.get('acheteur')
             commande.fournisseur_id = int(request.form['fournisseur_id']) if request.form.get('fournisseur_id') else None
             commande.affaire = request.form.get('affaire')
@@ -4484,6 +4545,7 @@ def modifier_commande(id):
     return render_template('admin/commande_form.html', 
                          commande=commande, 
                          fournisseurs=fournisseurs,
+                         services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
                          titre="Modifier la commande")
 
 @app.route('/commande/supprimer/<int:id>', methods=['POST'])
@@ -5078,15 +5140,22 @@ def ajouter_mouvement_stock():
         return denied_response
 
     produits = Produit.query.filter(Produit.actif.is_(True)).order_by(Produit.nom.asc()).all()
+    form_lines = get_stock_movement_form_lines()
+    form_values = {
+        'type_mouvement': MouvementStock.TYPE_ENTREE,
+        'motif': '',
+    }
 
     if request.method == 'POST':
+        form_lines = get_stock_movement_form_lines(request.form)
+        form_values = {
+            'type_mouvement': request.form.get('type_mouvement') or MouvementStock.TYPE_ENTREE,
+            'motif': (request.form.get('motif') or '').strip(),
+        }
         try:
-            produit_id = request.form.get('produit_id')
-            type_mouvement = request.form.get('type_mouvement')
-            motif = (request.form.get('motif') or '').strip()
+            type_mouvement = form_values['type_mouvement']
+            motif = form_values['motif']
 
-            if not produit_id or not produit_id.isdigit():
-                raise ValueError('Produit invalide')
             if type_mouvement not in {
                 MouvementStock.TYPE_ENTREE,
                 MouvementStock.TYPE_SORTIE,
@@ -5094,38 +5163,65 @@ def ajouter_mouvement_stock():
             }:
                 raise ValueError('Type de mouvement invalide')
 
-            produit = Produit.query.get(int(produit_id))
-            if not produit:
-                raise ValueError('Produit introuvable')
+            movements_to_apply = []
+            seen_products = set()
+            for line_number, line in enumerate(form_lines, start=1):
+                produit_id = (line.get('produit_id') or '').strip()
+                quantite_value = (line.get('quantite') or '').strip()
 
-            if type_mouvement == MouvementStock.TYPE_AJUSTEMENT:
-                variation = valider_quantite(request.form.get('quantite'), autoriser_negative=True)
-            elif type_mouvement == MouvementStock.TYPE_ENTREE:
-                variation = valider_quantite(request.form.get('quantite'))
-            else:
-                variation = -valider_quantite(request.form.get('quantite'))
+                if not produit_id and not quantite_value:
+                    continue
+                if not produit_id or not quantite_value:
+                    raise ValueError(f'Ligne {line_number}: produit et quantité sont obligatoires')
+                if not produit_id.isdigit():
+                    raise ValueError(f'Ligne {line_number}: produit invalide')
+                if produit_id in seen_products:
+                    raise ValueError(f'Ligne {line_number}: le produit est dupliqué')
 
-            mouvement = appliquer_mouvement_stock(
-                produit,
-                variation,
-                type_mouvement,
-                motif or 'Mouvement manuel'
-            )
-            db.session.flush()
-            enregistrer_log(
-                'CREATE',
-                'mouvement_stock',
-                mouvement.id,
-                f'{type_mouvement} stock {produit.nom} ({variation:+,.2f})'
-            )
+                produit = Produit.query.get(int(produit_id))
+                if not produit:
+                    raise ValueError(f'Ligne {line_number}: produit introuvable')
+
+                if type_mouvement == MouvementStock.TYPE_AJUSTEMENT:
+                    variation = valider_quantite(quantite_value, autoriser_negative=True)
+                elif type_mouvement == MouvementStock.TYPE_ENTREE:
+                    variation = valider_quantite(quantite_value)
+                else:
+                    variation = -valider_quantite(quantite_value)
+
+                movements_to_apply.append((produit, variation))
+                seen_products.add(produit_id)
+
+            if not movements_to_apply:
+                raise ValueError('Ajoutez au moins un produit avec une quantité')
+
+            for produit, variation in movements_to_apply:
+                mouvement = appliquer_mouvement_stock(
+                    produit,
+                    variation,
+                    type_mouvement,
+                    motif or 'Mouvement manuel'
+                )
+                db.session.flush()
+                enregistrer_log(
+                    'CREATE',
+                    'mouvement_stock',
+                    mouvement.id,
+                    f'{type_mouvement} stock {produit.nom} ({variation:+,.2f})'
+                )
             db.session.commit()
-            flash('Mouvement de stock enregistré', 'success')
+            flash(f'{len(movements_to_apply)} mouvement(s) de stock enregistré(s)', 'success')
             return redirect(url_for('mouvements_stock'))
         except (ValueError, IntegrityError) as e:
             db.session.rollback()
             flash(f'Erreur lors de l\'enregistrement: {str(e)}', 'danger')
 
-    return render_template('stocks/mouvement_form.html', produits=produits)
+    return render_template(
+        'stocks/mouvement_form.html',
+        produits=produits,
+        form_lines=form_lines,
+        form_values=form_values,
+    )
 
 
 @app.route('/ventes')
@@ -5771,26 +5867,6 @@ def init_db():
                 print(f"Utilisateur admin créé: {admin_username}")
             else:
                 print(f"Utilisateur admin créé: {admin_username} / {admin_password}")
-        
-        # Créer quelques fournisseurs de test si la base est vide
-        fournisseurs_test = [
-            {'nom': 'ETS GREEN', 'pays': 'Cameroun', 'categorie': 'Transport'},
-            {'nom': 'BAT ELEC', 'pays': 'Cameroun', 'categorie': 'Électrique'},
-            {'nom': 'STE ICE', 'pays': 'Cameroun', 'categorie': 'Mobilier'},
-            {'nom': 'DJIMY TECHNOLOGIE SERVICES', 'pays': 'Cameroun', 'categorie': 'Informatique'},
-            {'nom': 'FOSHAN YOU YOU FURNITURE CO', 'pays': 'Chine', 'categorie': 'Mobilier'},
-        ]
-        created_count = 0
-        for fournisseur_data in fournisseurs_test:
-            exists = Fournisseur.query.filter_by(nom=fournisseur_data['nom']).first()
-            if exists:
-                continue
-            db.session.add(Fournisseur(**fournisseur_data))
-            created_count += 1
-
-        if created_count:
-            db.session.commit()
-            print("Fournisseurs de test créés")
 
 # ==================== ROUTES PERFORMANCES ====================
 
@@ -6102,10 +6178,28 @@ def performances_produits():
                 'montant_moyen': p.montant_moyen or 0,
                 'pourcentage': (p.total_montant / total_general * 100) if total_general > 0 else 0
             })
-    
-    return render_template('performances/produits.html', 
-                         stats=produits_data,
-                         total_montant=total_general)
+
+    catalog = get_product_category_catalog()
+    categories_reference = []
+    total_catalog_categories = 0
+    for family_label in catalog.get('families', []):
+        category_labels = list(catalog.get('categories_by_family', {}).get(family_label, []))
+        total_catalog_categories += len(category_labels)
+        categories_reference.append({
+            'famille': family_label,
+            'categories': category_labels,
+            'count': len(category_labels),
+        })
+
+    return render_template(
+        'performances/produits.html',
+        stats=produits_data,
+        total_montant=total_general,
+        categories_reference=categories_reference,
+        total_catalog_categories=total_catalog_categories,
+        total_catalog_families=len(categories_reference),
+        catalog_source=os.path.basename(catalog.get('source_path') or ''),
+    )
 
 
 @app.route('/performances/ventes')

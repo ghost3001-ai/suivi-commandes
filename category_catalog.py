@@ -239,6 +239,51 @@ def _build_empty_catalog(path):
     }
 
 
+def _parse_source_family_sheet(workbook, source_path):
+    """Construit le catalogue depuis l'onglet `Famille` du classeur source."""
+    if 'Famille' not in workbook.sheetnames:
+        return None
+
+    worksheet = workbook['Famille']
+    families = []
+    categories_by_family = OrderedDict()
+    category_to_family = {}
+    current_family = None
+
+    for row_index, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
+        if row_index <= 2:
+            continue
+
+        family_number = _clean_label(row[0]) if len(row) > 0 else None
+        family_label = _clean_label(row[1]) if len(row) > 1 else None
+        category_label = _clean_label(row[2]) if len(row) > 2 else None
+
+        if family_number and family_label:
+            current_family = family_label
+            if current_family not in categories_by_family:
+                families.append(current_family)
+                categories_by_family[current_family] = []
+
+        if current_family and category_label:
+            family_categories = categories_by_family.setdefault(current_family, [])
+            if category_label not in family_categories:
+                family_categories.append(category_label)
+            category_to_family[category_label] = current_family
+
+    if not families:
+        return _build_empty_catalog(source_path)
+
+    return {
+        'source_path': source_path,
+        'families': families,
+        'categories_by_family': categories_by_family,
+        'subcategories_by_category': {},
+        'family_lookup': set(families),
+        'category_lookup': set(category_to_family.keys()),
+        'category_to_family': category_to_family,
+    }
+
+
 def _load_family_overrides(path=None):
     override_path = path or DEFAULT_FAMILY_OVERRIDE_PATH
     if not override_path or not os.path.exists(override_path):
@@ -304,6 +349,10 @@ def load_category_catalog(path=None, family_override_path=None):
         return _build_empty_catalog(source_path)
 
     workbook = load_workbook(source_path, data_only=True, read_only=True)
+    source_family_catalog = _parse_source_family_sheet(workbook, source_path)
+    if source_family_catalog is not None:
+        return source_family_catalog
+
     families = OrderedDict()
     family_order = []
     category_to_family = {}

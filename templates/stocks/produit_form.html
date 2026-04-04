@@ -48,7 +48,7 @@
                         <option value="{{ categorie }}" {% if form_values.categorie == categorie %}selected{% endif %}>{{ categorie }}</option>
                         {% endfor %}
                     </select>
-                    <div class="form-text">Référentiel chargé depuis le fichier catégories du projet.</div>
+                    <div class="form-text">Les 49 catégories sont préchargées. Choisis une famille pour filtrer la liste.</div>
                 </div>
             </div>
 
@@ -106,6 +106,17 @@ document.addEventListener('DOMContentLoaded', function () {
     const catalog = {{ catalog_ui | tojson }};
     const familySelect = document.getElementById('famille');
     const categorySelect = document.getElementById('categorie');
+    const allCategories = [];
+    const seenCategories = new Set();
+
+    (catalog.families || []).forEach(function (familyName) {
+        ((catalog.categories_by_family || {})[familyName] || []).forEach(function (categoryName) {
+            if (!seenCategories.has(categoryName)) {
+                seenCategories.add(categoryName);
+                allCategories.push(categoryName);
+            }
+        });
+    });
 
     function renderOptions(select, options, placeholder, selectedValue) {
         const optionList = Array.isArray(options) ? options : [];
@@ -130,7 +141,9 @@ document.addEventListener('DOMContentLoaded', function () {
     function syncCategories() {
         const selectedFamily = familySelect.value;
         const selectedCategory = categorySelect.dataset.selected || categorySelect.value;
-        const categories = (catalog.categories_by_family || {})[selectedFamily] || [];
+        const categories = selectedFamily
+            ? ((catalog.categories_by_family || {})[selectedFamily] || [])
+            : allCategories;
         renderOptions(categorySelect, categories, 'Sélectionner une catégorie', selectedCategory);
 
         if (selectedCategory && !categories.includes(selectedCategory)) {

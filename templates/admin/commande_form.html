@@ -52,7 +52,13 @@
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Service demandeur</label>
-                    <input type="text" name="service_demandeur" class="form-control" value="{{ commande.service_demandeur if commande else '' }}">
+                    {% set selected_service = request.form.get('service_demandeur') if request.method == 'POST' else (commande.service_demandeur if commande else '') %}
+                    <select name="service_demandeur" class="form-select">
+                        <option value="">Sélectionner</option>
+                        {% for service in services_demandeur %}
+                        <option value="{{ service }}" {% if selected_service == service %}selected{% endif %}>{{ service }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
             </div>
             

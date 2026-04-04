@@ -16,34 +16,63 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">Produit *</label>
-                    <select name="produit_id" class="form-select" required>
-                        <option value="">Sélectionner</option>
-                        {% for produit in produits %}
-                        <option value="{{ produit.id }}">{{ produit.nom }} (stock: {{ "{:,.2f}".format(produit.stock_actuel or 0) }})</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-6 mb-3">
                     <label class="form-label">Type de mouvement *</label>
                     <select name="type_mouvement" id="type_mouvement" class="form-select" required>
-                        <option value="ENTREE">Entrée</option>
-                        <option value="SORTIE">Sortie</option>
-                        <option value="AJUSTEMENT">Ajustement</option>
+                        <option value="ENTREE" {% if form_values.type_mouvement == 'ENTREE' %}selected{% endif %}>Entrée</option>
+                        <option value="SORTIE" {% if form_values.type_mouvement == 'SORTIE' %}selected{% endif %}>Sortie</option>
+                        <option value="AJUSTEMENT" {% if form_values.type_mouvement == 'AJUSTEMENT' %}selected{% endif %}>Ajustement</option>
                     </select>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Quantité *</label>
-                    <input type="number" step="0.01" name="quantite" class="form-control" required>
-                    <small class="text-muted" id="quantite-help">Saisir une quantité positive.</small>
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Motif</label>
-                    <input type="text" name="motif" class="form-control" placeholder="Réception, correction, perte...">
+                    <input type="text" name="motif" class="form-control" placeholder="Réception, correction, perte..." value="{{ form_values.motif }}">
                 </div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div>
+                    <label class="form-label mb-1">Produits et quantités *</label>
+                    <div><small class="text-muted" id="quantite-help">Saisir une quantité positive.</small></div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="add-movement-line">
+                    <i class="bi bi-plus-lg"></i> Ajouter une ligne
+                </button>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="movement-lines-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 65%;">Produit</th>
+                            <th style="width: 25%;">Quantité</th>
+                            <th style="width: 10%;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="movement-lines-body">
+                        {% for line in form_lines %}
+                        <tr class="movement-line">
+                            <td>
+                                <select name="produit_id[]" class="form-select" required>
+                                    <option value="">Sélectionner</option>
+                                    {% for produit in produits %}
+                                    <option value="{{ produit.id }}" {% if line.produit_id|string == produit.id|string %}selected{% endif %}>
+                                        {{ produit.nom }} (stock: {{ "{:,.2f}".format(produit.stock_actuel or 0) }})
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <input type="number" step="0.01" name="quantite[]" class="form-control" value="{{ line.quantite }}" required>
+                            </td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger remove-line">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
 
             <button type="submit" class="btn btn-primary">
@@ -59,6 +88,49 @@
 <script>
     const typeMouvement = document.getElementById('type_mouvement');
     const help = document.getElementById('quantite-help');
+    const movementLinesBody = document.getElementById('movement-lines-body');
+    const addLineButton = document.getElementById('add-movement-line');
+
+    function buildProductOptions(selectedValue = '') {
+        const options = ['<option value="">Sélectionner</option>'];
+        {% for produit in produits %}
+        options.push(
+            `<option value="{{ produit.id }}" ${selectedValue === "{{ produit.id }}" ? 'selected' : ''}>{{ produit.nom|e }} (stock: {{ "{:,.2f}".format(produit.stock_actuel or 0) }})</option>`
+        );
+        {% endfor %}
+        return options.join('');
+    }
+
+    function addMovementLine(selectedValue = '', quantity = '') {
+        const row = document.createElement('tr');
+        row.className = 'movement-line';
+        row.innerHTML = `
+            <td>
+                <select name="produit_id[]" class="form-select" required>
+                    ${buildProductOptions(selectedValue)}
+                </select>
+            </td>
+            <td>
+                <input type="number" step="0.01" name="quantite[]" class="form-control" value="${quantity}" required>
+            </td>
+            <td class="text-end">
+                <button type="button" class="btn btn-sm btn-outline-danger remove-line">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        `;
+        movementLinesBody.appendChild(row);
+    }
+
+    function refreshRemoveButtons() {
+        const rows = movementLinesBody.querySelectorAll('.movement-line');
+        rows.forEach((row, index) => {
+            const button = row.querySelector('.remove-line');
+            button.disabled = rows.length === 1;
+            button.classList.toggle('disabled', rows.length === 1);
+            button.setAttribute('aria-label', `Supprimer la ligne ${index + 1}`);
+        });
+    }
 
     function refreshHelp() {
         if (typeMouvement.value === 'AJUSTEMENT') {
@@ -70,7 +142,26 @@
         }
     }
 
+    addLineButton.addEventListener('click', () => {
+        addMovementLine();
+        refreshRemoveButtons();
+    });
+
+    movementLinesBody.addEventListener('click', (event) => {
+        const button = event.target.closest('.remove-line');
+        if (!button) {
+            return;
+        }
+        const row = button.closest('.movement-line');
+        if (!row || movementLinesBody.querySelectorAll('.movement-line').length === 1) {
+            return;
+        }
+        row.remove();
+        refreshRemoveButtons();
+    });
+
     typeMouvement.addEventListener('change', refreshHelp);
     refreshHelp();
+    refreshRemoveButtons();
 </script>
 {% endblock %}

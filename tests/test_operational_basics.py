@@ -1,3 +1,5 @@
+from html import unescape
+
 from datetime import date, timedelta
 
 
@@ -6,6 +8,14 @@ def seed_paginated_data(app_module):
         db = app_module.db
         admin_user = app_module.Utilisateur.query.filter_by(role='admin').first()
         fournisseur = app_module.Fournisseur.query.first()
+        if fournisseur is None:
+            fournisseur = app_module.Fournisseur(
+                nom='Fournisseur test',
+                pays='Cameroun',
+                categorie='Test',
+            )
+            db.session.add(fournisseur)
+            db.session.flush()
 
         for index in range(30):
             db.session.add(
@@ -114,6 +124,10 @@ def test_stale_session_is_cleared_when_database_bootstraps(empty_app_module):
 def test_paginated_views_are_accessible_for_authenticated_admin(authenticated_client, app_module):
     seed_paginated_data(app_module)
 
+    response = authenticated_client.get('/dashboard')
+    assert response.status_code == 200
+    assert 'Tableau de bord analytique' in response.get_data(as_text=True)
+
     response = authenticated_client.get('/stocks?page=2')
     assert response.status_code == 200
     assert 'Précédent' in response.get_data(as_text=True)
@@ -204,3 +218,83 @@ def test_supplier_performance_filters_and_exports(authenticated_client, app_modu
     response = authenticated_client.get(f'/performances/fournisseur/{fournisseur_id}/export/pdf?period=month')
     assert response.status_code == 200
     assert response.mimetype == 'application/pdf'
+
+
+def test_product_performance_page_exposes_catalog_categories(authenticated_client, app_module):
+    catalog = app_module.get_product_category_catalog()
+    expected_total = sum(
+        len(catalog['categories_by_family'].get(famille, []))
+        for famille in catalog.get('families', [])
+    )
+    assert expected_total > 0
+
+    expected_family = catalog['families'][0]
+    expected_category = catalog['categories_by_family'][expected_family][0]
+
+    response = authenticated_client.get('/performances/produits')
+    assert response.status_code == 200
+
+    body = unescape(response.get_data(as_text=True))
+    assert 'Catégories du référentiel' in body
+    assert f'{expected_total} catégories' in body
+    assert expected_family in body
+    assert expected_category in body
+
+
+def test_product_form_preloads_catalog_categories(authenticated_client, app_module):
+    catalog = app_module.get_product_category_catalog()
+    expected_total = sum(
+        len(catalog['categories_by_family'].get(famille, []))
+        for famille in catalog.get('families', [])
+    )
+    expected_category = catalog['categories_by_family'][catalog['families'][0]][0]
+
+    response = authenticated_client.get('/stock/produit/ajouter')
+    assert response.status_code == 200
+
+    body = unescape(response.get_data(as_text=True))
+    assert 'Les 49 catégories sont préchargées.' in body
+    assert expected_category in body
+    assert body.count('<option value="') >= expected_total
+
+
+def test_manual_stock_movement_supports_multiple_products(authenticated_client, app_module):
+    with app_module.app.app_context():
+        produit_a = app_module.Produit(
+            nom='Produit A',
+            code='MP-A',
+            famille='Famille test',
+            categorie='Categorie test',
+            stock_actuel=10,
+            stock_minimum=1,
+            actif=True,
+        )
+        produit_b = app_module.Produit(
+            nom='Produit B',
+            code='MP-B',
+            famille='Famille test',
+            categorie='Categorie test',
+            stock_actuel=4,
+            stock_minimum=1,
+            actif=True,
+        )
+        app_module.db.session.add_all([produit_a, produit_b])
+        app_module.db.session.commit()
+        produit_a_id = produit_a.id
+        produit_b_id = produit_b.id
+
+    response = authenticated_client.post('/stock/mouvement/ajouter', data={
+        'type_mouvement': 'ENTREE',
+        'motif': 'Réception lot',
+        'produit_id[]': [str(produit_a_id), str(produit_b_id)],
+        'quantite[]': ['5', '3'],
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert '2 mouvement(s) de stock enregistré(s)' in response.get_data(as_text=True)
+
+    with app_module.app.app_context():
+        produit_a = app_module.Produit.query.get(produit_a_id)
+        produit_b = app_module.Produit.query.get(produit_b_id)
+        assert produit_a.stock_actuel == 15
+        assert produit_b.stock_actuel == 7
+        assert app_module.MouvementStock.query.count() == 2

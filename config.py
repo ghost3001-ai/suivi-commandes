@@ -16,6 +16,8 @@ SQLITE_DB_PATH = os.path.join(INSTANCE_PATH, 'commandes.db').replace('\\', '/')
 os.makedirs(os.path.join(BASE_DIR, 'uploads'), exist_ok=True)
 os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
 
+SOURCE_WORKBOOK_PATH = os.path.join(os.path.dirname(BASE_DIR), 'Projet Suivi Commande ASS.xlsx')
+
 
 def get_database_url():
     """Construit une URL de base de données compatible en dev et prod."""
@@ -62,7 +64,10 @@ class Config:
     # Configuration pour l'upload de fichiers
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-    CATEGORY_CATALOG_FILE = os.environ.get('CATEGORY_CATALOG_FILE') or os.path.join(BASE_DIR, 'data', 'categorie_ass1.xlsx')
+    CATEGORY_CATALOG_FILE = (
+        os.environ.get('CATEGORY_CATALOG_FILE')
+        or (SOURCE_WORKBOOK_PATH if os.path.exists(SOURCE_WORKBOOK_PATH) else os.path.join(BASE_DIR, 'data', 'categorie_ass1.xlsx'))
+    )
     CATEGORY_FAMILY_OVERRIDE_FILE = os.environ.get('CATEGORY_FAMILY_OVERRIDE_FILE') or os.path.join(BASE_DIR, 'data', 'familles_ass1.xlsx')
     IMPORT_PREVIEW_TTL_HOURS = int(os.environ.get('IMPORT_PREVIEW_TTL_HOURS') or 24)
 
