@@ -5761,7 +5761,7 @@ def migrate_existing_schema():
         "CREATE INDEX IF NOT EXISTS idx_mouvements_stock_type ON mouvements_stock (type_mouvement)",
         "CREATE INDEX IF NOT EXISTS idx_mouvements_stock_created_at ON mouvements_stock (created_at)",
         "CREATE INDEX IF NOT EXISTS idx_logs_action ON logs (action)",
-        "CREATE INDEX IF NOT EXISTS idx_logs_table ON logs (table)",
+        'CREATE INDEX IF NOT EXISTS idx_logs_table ON logs ("table")',
         "CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs (created_at)",
     ]
 
