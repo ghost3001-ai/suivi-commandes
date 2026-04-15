@@ -8,7 +8,7 @@
         <i class="bi bi-list-check"></i> Commandes
     </h1>
     <div class="btn-toolbar">
-        {% if can('commandes_manage') %}
+        {% if commande_capabilities.can_manage_core %}
         <a href="{{ url_for('importer_excel') }}" class="btn btn-outline-secondary me-2">
             <i class="bi bi-upload"></i> Importer
         </a>
@@ -18,7 +18,7 @@
             <i class="bi bi-file-excel"></i> Exporter
         </a>
         {% endif %}
-        {% if can('commandes_manage') %}
+        {% if commande_capabilities.can_manage_core %}
         <a href="{{ url_for('ajouter_commande') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg"></i> Nouvelle
         </a>
@@ -26,9 +26,24 @@
     </div>
 </div>
 
-<!-- Filtres -->
+<div class="row g-3 mb-4">
+    {% for view_key, view_label in view_labels.items() if view_key != 'toutes' %}
+    <div class="col-lg-3 col-md-6">
+        <a class="text-decoration-none" href="{{ url_for('commandes', vue=view_key, entite=filtres.entite, statut=filtres.statut, acheteur=filtres.acheteur, fournisseur=filtres.fournisseur, recherche=filtres.recherche) }}">
+            <div class="card shadow-sm h-100 {% if selected_view == view_key %}border-primary{% endif %}">
+                <div class="card-body">
+                    <small class="text-muted text-uppercase">{{ view_label }}</small>
+                    <div class="display-6 mt-2">{{ view_counts[view_key] }}</div>
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+
 <div class="filters-bar">
     <form method="GET" class="row g-3">
+        <input type="hidden" name="vue" value="{{ selected_view }}">
         <div class="col-md-3">
             <label class="form-label small text-muted">Entité</label>
             <select name="entite" class="form-select">
@@ -39,11 +54,11 @@
             </select>
         </div>
         <div class="col-md-3">
-            <label class="form-label small text-muted">Statut</label>
+            <label class="form-label small text-muted">Paiement</label>
             <select name="statut" class="form-select">
                 <option value="">Tous</option>
-                <option value="PAYÉ" {% if filtres.statut == 'PAYÉ' %}selected{% endif %}>PAYÉ</option>
-                <option value="A PAYER" {% if filtres.statut == 'A PAYER' %}selected{% endif %}>À PAYER</option>
+                <option value="PAYÉ" {% if filtres.statut == 'PAYÉ' %}selected{% endif %}>Payées</option>
+                <option value="A PAYER" {% if filtres.statut == 'A PAYER' %}selected{% endif %}>Non payées</option>
             </select>
         </div>
         <div class="col-md-3">
@@ -64,25 +79,24 @@
                 {% endfor %}
             </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-4">
             <label class="form-label small text-muted">Recherche</label>
-            <input type="text" name="recherche" class="form-control" placeholder="Affaire, demandeur..." value="{{ filtres.recherche }}">
+            <input type="text" name="recherche" class="form-control" placeholder="BC, demandeur, facture..." value="{{ filtres.recherche }}">
         </div>
         <div class="col-12">
             <button type="submit" class="btn btn-primary">
                 <i class="bi bi-funnel"></i> Filtrer
             </button>
-            <a href="{{ url_for('commandes') }}" class="btn btn-secondary">
+            <a href="{{ url_for('commandes', vue=selected_view) }}" class="btn btn-secondary">
                 <i class="bi bi-arrow-repeat"></i> Réinitialiser
             </a>
         </div>
     </form>
 </div>
 
-<!-- Tableau des commandes -->
 <div class="card shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <span>Résultats filtrés</span>
+        <span>{{ selected_view_label }}</span>
         <small class="text-muted">{{ pagination.total if pagination else commandes|length }} résultat(s)</small>
     </div>
     <div class="card-body p-0">
@@ -90,63 +104,81 @@
             <table class="table table-hover mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>Nr.</th>
+                        <th>N° Bon commande</th>
                         <th>Date CDE</th>
                         <th>Entité</th>
-                        <th>Demandeur</th>
+                        <th>Service / Demandeur</th>
                         <th>Fournisseur</th>
-                        <th>Montant</th>
-                        <th>Solde</th>
-                        <th>Statut</th>
-                        <th>Délai</th>
-                        {% if can('commandes_manage') %}
+                        <th class="text-end">Montant</th>
+                        <th>Paiement</th>
+                        <th>Avancement</th>
+                        <th>Niveau</th>
+                        {% if commande_capabilities.can_edit_any %}
                         <th>Actions</th>
                         {% endif %}
                     </tr>
                 </thead>
                 <tbody>
                     {% for c in commandes %}
-                    <tr {% if c.est_en_retard() %}class="table-warning"{% endif %}>
-                        <td><a href="{{ url_for('voir_commande', id=c.id) }}">{{ c.nr or '-' }}</a></td>
+                    <tr {% if c.est_en_retard() and not c.est_achevee() %}class="table-warning"{% endif %}>
+                        <td>
+                            <a href="{{ url_for('voir_commande', id=c.id) }}">{{ c.bon_commande or '-' }}</a>
+                            <div class="small text-muted">Nr. {{ c.nr or '-' }}</div>
+                        </td>
                         <td>{{ format_date(c.date_cde) }}</td>
                         <td><span class="badge bg-secondary">{{ c.entite or '-' }}</span></td>
-                        <td>{{ c.demandeur or '-' }}</td>
+                        <td>
+                            <div>{{ c.service_demandeur or '-' }}</div>
+                            <div class="small text-muted">{{ c.demandeur or '-' }}</div>
+                        </td>
                         <td>{{ c.fournisseur.nom if c.fournisseur else '-' }}</td>
-                        <td class="text-end">{{ "{:,.0f}".format(c.montant) }} FCFA</td>
-                        <td class="text-end">{{ "{:,.0f}".format(c.solde) }} FCFA</td>
+                        <td class="text-end">
+                            <strong>{{ "{:,.0f}".format(c.montant or 0) }} FCFA</strong>
+                            <div class="small text-muted">Avance: {{ "{:,.0f}".format(c.avance or 0) }} FCFA</div>
+                        </td>
                         <td>
                             <span class="badge {% if c.est_payee() %}bg-success{% else %}bg-danger{% endif %}">
                                 {{ c.statut or '-' }}
                             </span>
                         </td>
                         <td>
-                            {% if c.est_en_retard() %}
-                            <span class="badge badge-retard">+{{ c.get_delai() }}j</span>
+                            <span class="badge {% if c.est_achevee() %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                                {{ c.get_statut_avancement() }}
+                            </span>
+                        </td>
+                        <td>
+                            <div>{{ c.get_niveau_processus() }}</div>
+                            {% if c.est_en_retard() and not c.est_achevee() %}
+                            <div class="small text-danger">Retard: +{{ c.get_delai() }}j</div>
+                            {% elif c.date_reception %}
+                            <div class="small text-muted">Réception: {{ format_date(c.date_reception) }}</div>
                             {% else %}
-                            <span class="text-muted">-</span>
+                            <div class="small text-muted">Livraison prévue: {{ format_date(c.date_livraison) or '-' }}</div>
                             {% endif %}
                         </td>
-                        {% if can('commandes_manage') %}
+                        {% if commande_capabilities.can_edit_any %}
                         <td>
                             <div class="btn-group btn-group-sm">
                                 <a href="{{ url_for('modifier_commande', id=c.id) }}" class="btn btn-outline-primary">
                                     <i class="bi bi-pencil"></i>
                                 </a>
+                                {% if commande_capabilities.can_delete %}
                                 <form method="POST" action="{{ url_for('supprimer_commande', id=c.id) }}" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Supprimer cette commande ?')">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </form>
+                                {% endif %}
                             </div>
                         </td>
                         {% endif %}
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="{% if can('commandes_manage') %}10{% else %}9{% endif %}" class="text-center py-4 text-muted">
+                        <td colspan="{% if commande_capabilities.can_edit_any %}10{% else %}9{% endif %}" class="text-center py-4 text-muted">
                             <i class="bi bi-inbox fs-1"></i><br>
-                            Aucune commande trouvée
+                            Aucune commande trouvée dans cette vue
                         </td>
                     </tr>
                     {% endfor %}
@@ -157,5 +189,4 @@
 </div>
 
 {% include "_pagination.html" %}
-
 {% endblock %}

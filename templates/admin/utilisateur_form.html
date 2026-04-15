@@ -49,8 +49,14 @@
                         <option value="achats" {% if utilisateur and utilisateur.role == 'achats' %}selected{% endif %}>
                             Achats (gestion des commandes uniquement)
                         </option>
+                        <option value="service_comptable" {% if utilisateur and utilisateur.role == 'service_comptable' %}selected{% endif %}>
+                            Service comptable (mise à jour paiements fournisseurs)
+                        </option>
+                        <option value="service_marketing" {% if utilisateur and utilisateur.role == 'service_marketing' %}selected{% endif %}>
+                            Service marketing (lecture seule commandes)
+                        </option>
                         <option value="gestionnaire_stock" {% if utilisateur and utilisateur.role == 'gestionnaire_stock' %}selected{% endif %}>
-                            Gestionnaire de stock (stocks + lecture commandes)
+                            Gestionnaire de stock (stocks + réception commandes)
                         </option>
                         <option value="ingenieur" {% if utilisateur and utilisateur.role == 'ingenieur' %}selected{% endif %}>
                             Ingénieur (lecture commandes, stocks, performances)

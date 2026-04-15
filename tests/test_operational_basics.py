@@ -150,6 +150,11 @@ def test_paginated_views_are_accessible_for_authenticated_admin(authenticated_cl
 def test_role_restrictions_for_achats_stock_manager_and_engineer(app_module):
     seed_paginated_data(app_module)
 
+    with app_module.app.app_context():
+        commande = app_module.Commande.query.order_by(app_module.Commande.id.desc()).first()
+        assert commande is not None
+        commande_id = commande.id
+
     achats_client = build_role_client(app_module, 'achats', 'achats_user')
     response = achats_client.get('/commandes')
     assert response.status_code == 200
@@ -168,6 +173,8 @@ def test_role_restrictions_for_achats_stock_manager_and_engineer(app_module):
     response = stock_client.get('/commande/ajouter', follow_redirects=False)
     assert response.status_code == 302
     assert '/commandes' in response.headers['Location']
+    response = stock_client.get(f'/commande/modifier/{commande_id}')
+    assert response.status_code == 200
     response = stock_client.get('/stock/produit/ajouter')
     assert response.status_code == 200
 
@@ -184,6 +191,100 @@ def test_role_restrictions_for_achats_stock_manager_and_engineer(app_module):
     response = ingenieur_client.get('/ventes', follow_redirects=False)
     assert response.status_code == 302
     assert '/commandes' in response.headers['Location']
+
+    comptable_client = build_role_client(app_module, 'service_comptable', 'compta_user')
+    response = comptable_client.get('/commandes')
+    assert response.status_code == 200
+    response = comptable_client.get('/commande/ajouter', follow_redirects=False)
+    assert response.status_code == 302
+    assert '/commandes' in response.headers['Location']
+    response = comptable_client.get(f'/commande/modifier/{commande_id}')
+    assert response.status_code == 200
+    response = comptable_client.get('/stocks', follow_redirects=False)
+    assert response.status_code == 302
+    assert '/commandes' in response.headers['Location']
+
+    marketing_client = build_role_client(app_module, 'service_marketing', 'marketing_user')
+    response = marketing_client.get('/commandes')
+    assert response.status_code == 200
+    response = marketing_client.get(f'/commande/modifier/{commande_id}', follow_redirects=False)
+    assert response.status_code == 302
+    assert '/commandes' in response.headers['Location']
+    response = marketing_client.get('/dashboard', follow_redirects=False)
+    assert response.status_code == 302
+    assert '/commandes' in response.headers['Location']
+
+
+def test_command_payment_and_reception_flow_updates_statuses(app_module):
+    with app_module.app.app_context():
+        db = app_module.db
+        fournisseur = app_module.Fournisseur.query.first()
+        if fournisseur is None:
+            fournisseur = app_module.Fournisseur(
+                nom='Workflow fournisseur',
+                pays='Cameroun',
+                categorie='Test',
+            )
+            db.session.add(fournisseur)
+            db.session.flush()
+
+        commande = app_module.Commande(
+            nr=999,
+            date_cde=date.today(),
+            entite='AFRILUX',
+            demandeur='Demandeur workflow',
+            service_demandeur='Marketing',
+            acheteur='GILLES',
+            fournisseur_id=fournisseur.id,
+            affaire='Commande workflow',
+            bon_commande='BC-WORKFLOW-001',
+            date_livraison=date.today(),
+            montant=1000,
+            avance=200,
+        )
+        commande.calculer_solde()
+        db.session.add(commande)
+        db.session.commit()
+        commande_id = commande.id
+
+    comptable_client = build_role_client(app_module, 'service_comptable', 'workflow_compta')
+    response = comptable_client.post(
+        f'/commande/modifier/{commande_id}',
+        data={
+            'avance': '1000',
+            'date_paiement': date.today().isoformat(),
+            'facture': 'FAC-001',
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app_module.app.app_context():
+        commande = app_module.db.session.get(app_module.Commande, commande_id)
+        assert commande is not None
+        assert commande.statut == app_module.Commande.STATUT_PAYE
+        assert commande.date_paiement == date.today()
+        assert commande.facture == 'FAC-001'
+        assert not commande.est_achevee()
+
+    stock_client = build_role_client(app_module, 'gestionnaire_stock', 'workflow_stock')
+    response = stock_client.post(
+        f'/commande/modifier/{commande_id}',
+        data={
+            'date_reception': date.today().isoformat(),
+            'bon_livraison': 'BL-001',
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app_module.app.app_context():
+        commande = app_module.db.session.get(app_module.Commande, commande_id)
+        assert commande is not None
+        assert commande.date_reception == date.today()
+        assert commande.bon_livraison == 'BL-001'
+        assert commande.est_achevee()
+        assert commande.get_statut_avancement() == app_module.Commande.PHASE_ACHEVEE
 
 
 def test_supplier_performance_filters_and_exports(authenticated_client, app_module):
@@ -257,6 +358,47 @@ def test_product_form_preloads_catalog_categories(authenticated_client, app_modu
     assert 'Les 49 catégories sont préchargées.' in body
     assert expected_category in body
     assert body.count('<option value="') >= expected_total
+
+
+def test_product_form_exposes_stock_management_fields(authenticated_client):
+    response = authenticated_client.get('/stock/produit/ajouter')
+    assert response.status_code == 200
+
+    body = unescape(response.get_data(as_text=True))
+    assert 'Type de stock' in body
+    assert 'Méthode de réapprovisionnement' in body
+    assert 'Méthode de valorisation' in body
+    assert 'Stock de sécurité' in body
+    assert 'Consommation moyenne / jour' in body
+    assert 'Taux de possession annuel' in body
+
+
+def test_product_model_computes_replenishment_metrics(app_module):
+    produit = app_module.Produit(
+        nom='Pompe de circulation',
+        type_stock=app_module.Produit.TYPE_MRO,
+        methode_reappro=app_module.Produit.REAPPRO_POINT_COMMANDE,
+        methode_valorisation=app_module.Produit.VALORISATION_CUMP,
+        prix_unitaire=100,
+        stock_actuel=20,
+        stock_minimum=5,
+        stock_securite=10,
+        delai_approvisionnement_jours=4,
+        consommation_moyenne_journaliere=3,
+        cout_passation_commande=5000,
+        taux_possession_annuel=25,
+        actif=True,
+    )
+
+    assert produit.get_type_stock_label() == 'Maintenance / MRO'
+    assert produit.get_methode_reappro_label() == 'Point de commande'
+    assert produit.get_methode_valorisation_label() == 'CUMP'
+    assert round(produit.point_commande, 2) == 22
+    assert round(produit.couverture_stock_jours, 2) == round(20 / 3, 2)
+    assert produit.quantite_economique_commande is not None
+    assert produit.doit_etre_reapprovisionne()
+    assert produit.get_quantite_reappro_recommandee() is not None
+    assert produit.get_etat_stock() == 'A_REAPPROVISIONNER'
 
 
 def test_catalog_uses_repo_root_workbook_by_default(app_module):

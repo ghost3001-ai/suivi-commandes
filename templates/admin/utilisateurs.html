@@ -50,6 +50,10 @@
                             <span class="badge bg-danger">Admin</span>
                             {% elif u.role == 'achats' %}
                             <span class="badge bg-primary">Achats</span>
+                            {% elif u.role == 'service_comptable' %}
+                            <span class="badge bg-success">Service comptable</span>
+                            {% elif u.role == 'service_marketing' %}
+                            <span class="badge bg-secondary">Service marketing</span>
                             {% elif u.role == 'gestionnaire_stock' %}
                             <span class="badge bg-warning text-dark">Gestionnaire stock</span>
                             {% elif u.role == 'ingenieur' %}

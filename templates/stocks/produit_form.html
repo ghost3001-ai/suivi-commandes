@@ -10,10 +10,14 @@
     </a>
 </div>
 
-<div class="card shadow-sm">
-    <div class="card-body">
-        <form method="POST">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-upc-scan"></i> Identification produit</h5>
+        </div>
+        <div class="card-body">
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Nom *</label>
@@ -50,15 +54,59 @@
                     </select>
                     <div class="form-text">Les 49 catégories sont préchargées. Choisis une famille pour filtrer la liste.</div>
                 </div>
-            </div>
-
-            <div class="row">
                 <div class="col-md-4 mb-3">
                     <label class="form-label">Unité</label>
-                    <input type="text" name="unite" class="form-control" placeholder="pièce, carton..." value="{{ form_values.unite }}">
+                    <input type="text" name="unite" class="form-control" placeholder="pièce, carton, mètre..." value="{{ form_values.unite }}">
                 </div>
             </div>
 
+            <div class="mb-3">
+                <label class="form-label">Description</label>
+                <textarea name="description" class="form-control" rows="3">{{ form_values.description }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-diagram-3"></i> Typologie et politiques</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Type de stock *</label>
+                    <select name="type_stock" class="form-select" required>
+                        {% for value, label in stock_type_options.items() %}
+                        <option value="{{ value }}" {% if form_values.type_stock == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Méthode de réapprovisionnement *</label>
+                    <select name="methode_reappro" id="methode_reappro" class="form-select" required>
+                        {% for value, label in stock_replenishment_options.items() %}
+                        <option value="{{ value }}" {% if form_values.methode_reappro == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Méthode de valorisation *</label>
+                    <select name="methode_valorisation" class="form-select" required>
+                        {% for value, label in stock_valuation_options.items() %}
+                        <option value="{{ value }}" {% if form_values.methode_valorisation == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">FIFO, LIFO ou CUMP pour la lecture comptable et analytique du stock.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-sliders"></i> Paramètres de stock</h5>
+        </div>
+        <div class="card-body">
             <div class="row">
                 <div class="col-md-4 mb-3">
                     <label class="form-label">Prix unitaire *</label>
@@ -76,36 +124,113 @@
                 </div>
             </div>
 
-            {% if produit %}
-            <div class="alert alert-info">
-                Le stock actuel se modifie via les mouvements de stock pour garder l'historique.
-                Stock actuel: <strong>{{ "{:,.2f}".format(produit.stock_actuel or 0) }} {{ produit.unite or '' }}</strong>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Stock de sécurité</label>
+                    <input type="number" step="0.01" min="0" name="stock_securite" class="form-control" value="{{ form_values.stock_securite }}">
+                    <div class="form-text">Tampon pour absorber retards fournisseurs et pics de demande.</div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Consommation moyenne / jour</label>
+                    <input type="number" step="0.01" min="0" name="consommation_moyenne_journaliere" class="form-control" value="{{ form_values.consommation_moyenne_journaliere }}">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Délai d’approvisionnement (jours)</label>
+                    <input type="number" step="0.1" min="0" name="delai_approvisionnement_jours" class="form-control" value="{{ form_values.delai_approvisionnement_jours }}">
+                </div>
             </div>
-            {% endif %}
 
-            <div class="mb-3">
-                <label class="form-label">Description</label>
-                <textarea name="description" class="form-control" rows="4">{{ form_values.description }}</textarea>
+            <div class="row">
+                <div class="col-md-4 mb-3" id="periodicite-wrapper">
+                    <label class="form-label">Périodicité de réappro (jours)</label>
+                    <input type="number" step="0.1" min="0" name="periodicite_reappro_jours" class="form-control" value="{{ form_values.periodicite_reappro_jours }}">
+                    <div class="form-text">Utile pour la politique calendaire à date fixe.</div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Coût de passation / commande (FCFA)</label>
+                    <input type="number" step="0.01" min="0" name="cout_passation_commande" class="form-control" value="{{ form_values.cout_passation_commande }}">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Taux de possession annuel (%)</label>
+                    <input type="number" step="0.01" min="0" max="100" name="taux_possession_annuel" class="form-control" value="{{ form_values.taux_possession_annuel }}">
+                </div>
             </div>
-
-            <div class="form-check mb-3">
-                <input type="checkbox" name="actif" id="actif" class="form-check-input" {% if form_values.actif %}checked{% endif %}>
-                <label for="actif" class="form-check-label">Produit actif</label>
-            </div>
-
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-save"></i> Enregistrer
-            </button>
-            <a href="{{ url_for('stocks') }}" class="btn btn-secondary">Annuler</a>
-        </form>
+        </div>
     </div>
-</div>
 
+    {% if produit %}
+    <div class="row mb-4">
+        <div class="col-md-3 mb-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <small class="text-muted">Stock actuel</small>
+                    <h4 class="mt-2 mb-0">{{ "{:,.2f}".format(produit.stock_actuel or 0) }} {{ produit.unite or '' }}</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <small class="text-muted">Point de commande</small>
+                    <h4 class="mt-2 mb-0">{{ "{:,.2f}".format(produit.point_commande or 0) }}</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <small class="text-muted">Couverture</small>
+                    <h4 class="mt-2 mb-0">
+                        {% if produit.couverture_stock_jours is not none %}
+                        {{ "{:,.1f}".format(produit.couverture_stock_jours) }} jours
+                        {% else %}
+                        -
+                        {% endif %}
+                    </h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <small class="text-muted">QEC Wilson</small>
+                    <h4 class="mt-2 mb-0">
+                        {% if produit.quantite_economique_commande is not none %}
+                        {{ "{:,.1f}".format(produit.quantite_economique_commande) }}
+                        {% else %}
+                        -
+                        {% endif %}
+                    </h4>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="alert alert-info">
+        Le stock actuel se modifie via les mouvements de stock pour garder l'historique.
+        État calculé: <strong>{{ produit.get_etat_stock().replace('_', ' ') }}</strong>.
+    </div>
+    {% endif %}
+
+    <div class="form-check mb-3">
+        <input type="checkbox" name="actif" id="actif" class="form-check-input" {% if form_values.actif %}checked{% endif %}>
+        <label for="actif" class="form-check-label">Produit actif</label>
+    </div>
+
+    <button type="submit" class="btn btn-primary">
+        <i class="bi bi-save"></i> Enregistrer
+    </button>
+    <a href="{{ url_for('stocks') }}" class="btn btn-secondary">Annuler</a>
+</form>
+{% endblock %}
+
+{% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const catalog = {{ catalog_ui | tojson }};
     const familySelect = document.getElementById('famille');
     const categorySelect = document.getElementById('categorie');
+    const replenishmentSelect = document.getElementById('methode_reappro');
+    const periodicityWrapper = document.getElementById('periodicite-wrapper');
     const allCategories = [];
     const seenCategories = new Set();
 
@@ -152,12 +277,20 @@ document.addEventListener('DOMContentLoaded', function () {
         categorySelect.dataset.selected = categorySelect.value;
     }
 
+    function syncPeriodiciteVisibility() {
+        const isCalendaire = replenishmentSelect.value === 'CALENDAIRE';
+        periodicityWrapper.classList.toggle('d-none', !isCalendaire);
+    }
+
     familySelect.addEventListener('change', function () {
         categorySelect.dataset.selected = '';
         syncCategories();
     });
 
+    replenishmentSelect.addEventListener('change', syncPeriodiciteVisibility);
+
     syncCategories();
+    syncPeriodiciteVisibility();
 });
 </script>
 {% endblock %}

@@ -26,27 +26,104 @@
 </div>
 
 <div class="row mb-4">
-    <div class="col-md-4 mb-3">
-        <div class="card card-stats stat-bleu">
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card card-stats stat-bleu h-100">
             <div class="card-body">
                 <small class="text-muted text-uppercase">Produits actifs</small>
                 <h2 class="mb-0 mt-1">{{ total_produits }}</h2>
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
-        <div class="card card-stats stat-vert">
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card card-stats stat-vert h-100">
             <div class="card-body">
-                <small class="text-muted text-uppercase">Valeur du stock</small>
-                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(valeur_stock) }} FCFA</h2>
+                <small class="text-muted text-uppercase">Valeur stock</small>
+                <h2 class="mb-0 mt-1">{{ "{:,.0f}".format(valeur_stock or 0) }} FCFA</h2>
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
-        <div class="card card-stats stat-orange">
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card card-stats stat-orange h-100">
             <div class="card-body">
                 <small class="text-muted text-uppercase">Stock faible</small>
                 <h2 class="mb-0 mt-1">{{ nb_stock_faible }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card card-stats h-100 border-danger">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Ruptures</small>
+                <h2 class="mb-0 mt-1 text-danger">{{ nb_ruptures }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card card-stats h-100 border-warning">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">À réappro</small>
+                <h2 class="mb-0 mt-1 text-warning">{{ nb_a_reappro }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-2 col-md-4 col-6 mb-3">
+        <div class="card card-stats h-100">
+            <div class="card-body">
+                <small class="text-muted text-uppercase">Couverture moyenne</small>
+                <h2 class="mb-0 mt-1">
+                    {% if couverture_moyenne is not none %}
+                    {{ "{:,.1f}".format(couverture_moyenne) }} j
+                    {% else %}
+                    -
+                    {% endif %}
+                </h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted">Taux de service stock</small>
+                <h4 class="mt-2 mb-0">{{ "{:,.1f}".format(taux_service_stock or 0) }}%</h4>
+                <div class="small text-muted mt-2">Approximation basée sur la disponibilité catalogue.</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted">Rotation estimée</small>
+                <h4 class="mt-2 mb-0">
+                    {% if rotation_estimee is not none %}
+                    {{ "{:,.2f}".format(rotation_estimee) }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </h4>
+                <div class="small text-muted mt-2">Coût des sorties 12 mois / valeur de stock courante.</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted">Coût annuel de possession estimé</small>
+                <h4 class="mt-2 mb-0">{{ "{:,.0f}".format(cout_possession_estime or 0) }} FCFA</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted">Répartition ABC</small>
+                <div class="mt-2 d-flex gap-2 flex-wrap">
+                    <span class="badge bg-danger">A: {{ abc_counts['A'] }}</span>
+                    <span class="badge bg-warning text-dark">B: {{ abc_counts['B'] }}</span>
+                    <span class="badge bg-secondary">C: {{ abc_counts['C'] }}</span>
+                </div>
             </div>
         </div>
     </div>
@@ -58,7 +135,7 @@
             <label class="form-label small text-muted">Recherche</label>
             <input type="text" name="recherche" class="form-control" value="{{ filtres.recherche }}" placeholder="Nom, code, description">
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label small text-muted">Famille</label>
             <select name="famille" class="form-select">
                 <option value="">Toutes</option>
@@ -67,7 +144,7 @@
                 {% endfor %}
             </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label small text-muted">Catégorie</label>
             <select name="categorie" class="form-select">
                 <option value="">Toutes</option>
@@ -77,12 +154,31 @@
             </select>
         </div>
         <div class="col-md-2">
+            <label class="form-label small text-muted">Type</label>
+            <select name="type_stock" class="form-select">
+                <option value="">Tous</option>
+                {% for value, label in stock_type_options.items() %}
+                <option value="{{ value }}" {% if filtres.type_stock == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-1">
+            <label class="form-label small text-muted">ABC</label>
+            <select name="classe_abc" class="form-select">
+                <option value="">Tous</option>
+                <option value="A" {% if filtres.classe_abc == 'A' %}selected{% endif %}>A</option>
+                <option value="B" {% if filtres.classe_abc == 'B' %}selected{% endif %}>B</option>
+                <option value="C" {% if filtres.classe_abc == 'C' %}selected{% endif %}>C</option>
+            </select>
+        </div>
+        <div class="col-md-2">
             <label class="form-label small text-muted">État</label>
             <select name="etat" class="form-select">
                 <option value="">Tous</option>
                 <option value="actif" {% if filtres.etat == 'actif' %}selected{% endif %}>Actifs</option>
                 <option value="faible" {% if filtres.etat == 'faible' %}selected{% endif %}>Stock faible</option>
                 <option value="rupture" {% if filtres.etat == 'rupture' %}selected{% endif %}>Rupture</option>
+                <option value="a_reappro" {% if filtres.etat == 'a_reappro' %}selected{% endif %}>À réapprovisionner</option>
                 <option value="inactif" {% if filtres.etat == 'inactif' %}selected{% endif %}>Inactifs</option>
             </select>
         </div>
@@ -108,10 +204,11 @@
                 <thead class="table-light">
                     <tr>
                         <th>Produit</th>
-                        <th>Famille / Catégorie</th>
-                        <th class="text-end">Prix unitaire</th>
+                        <th>Typologie</th>
+                        <th>Pilotage</th>
                         <th class="text-end">Stock</th>
-                        <th class="text-end">Seuil</th>
+                        <th class="text-end">Seuils</th>
+                        <th class="text-end">Couverture / QEC</th>
                         <th class="text-end">Valeur</th>
                         <th>État</th>
                         {% if can('stocks_manage') %}
@@ -127,24 +224,67 @@
                             {% if produit.code %}<br><small class="text-muted">{{ produit.code }}</small>{% endif %}
                         </td>
                         <td>
-                            {{ produit.famille or '-' }}
-                            {% if produit.categorie %}
-                            <br><small class="text-muted">{{ produit.categorie }}</small>
+                            <div>{{ produit.get_type_stock_label() }}</div>
+                            <small class="text-muted">{{ produit.famille or '-' }}{% if produit.categorie %} / {{ produit.categorie }}{% endif %}</small>
+                            <div class="mt-1">
+                                <span class="badge {% if produit.abc_classe == 'A' %}bg-danger{% elif produit.abc_classe == 'B' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                                    ABC {{ produit.abc_classe }}
+                                </span>
+                            </div>
+                        </td>
+                        <td>
+                            <div>{{ produit.get_methode_reappro_label() }}</div>
+                            <small class="text-muted">{{ produit.get_methode_valorisation_label() }}</small>
+                            {% if produit.periodicite_reappro_jours and produit.methode_reappro == 'CALENDAIRE' %}
+                            <div class="small text-muted">Période: {{ "{:,.0f}".format(produit.periodicite_reappro_jours) }} j</div>
                             {% endif %}
                         </td>
-                        <td class="text-end">{{ "{:,.0f}".format(produit.prix_unitaire or 0) }} FCFA</td>
-                        <td class="text-end">{{ "{:,.2f}".format(produit.stock_actuel or 0) }} {{ produit.unite or '' }}</td>
-                        <td class="text-end">{{ "{:,.2f}".format(produit.stock_minimum or 0) }}</td>
-                        <td class="text-end">{{ "{:,.0f}".format(produit.valeur_stock) }} FCFA</td>
+                        <td class="text-end">
+                            <strong>{{ "{:,.2f}".format(produit.stock_actuel or 0) }}</strong> {{ produit.unite or '' }}
+                            <div class="small text-muted">Conso/j: {{ "{:,.2f}".format(produit.consommation_moyenne_journaliere or 0) }}</div>
+                        </td>
+                        <td class="text-end">
+                            <div>Min: {{ "{:,.2f}".format(produit.stock_minimum or 0) }}</div>
+                            <div>Sécu: {{ "{:,.2f}".format(produit.stock_securite or 0) }}</div>
+                            <div class="small text-muted">PC: {{ "{:,.2f}".format(produit.point_commande_display or 0) }}</div>
+                        </td>
+                        <td class="text-end">
+                            <div>
+                                {% if produit.couverture_stock_jours_display is not none %}
+                                {{ "{:,.1f}".format(produit.couverture_stock_jours_display) }} j
+                                {% else %}
+                                -
+                                {% endif %}
+                            </div>
+                            <div class="small text-muted">
+                                QEC:
+                                {% if produit.qec_display is not none %}
+                                {{ "{:,.1f}".format(produit.qec_display) }}
+                                {% else %}
+                                -
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td class="text-end">
+                            <div>{{ "{:,.0f}".format(produit.valeur_stock or 0) }} FCFA</div>
+                            <div class="small text-muted">{{ "{:,.0f}".format(produit.prix_unitaire or 0) }} FCFA / unité</div>
+                        </td>
                         <td>
                             {% if not produit.actif %}
                             <span class="badge bg-secondary">Inactif</span>
-                            {% elif produit.stock_actuel <= 0 %}
+                            {% elif produit.etat_stock == 'RUPTURE' %}
                             <span class="badge bg-danger">Rupture</span>
-                            {% elif produit.est_stock_faible() %}
+                            {% elif produit.etat_stock == 'A_REAPPROVISIONNER' %}
+                            <span class="badge bg-warning text-dark">À réappro</span>
+                            {% elif produit.etat_stock == 'STOCK_FAIBLE' %}
                             <span class="badge bg-warning text-dark">Stock faible</span>
                             {% else %}
                             <span class="badge bg-success">Disponible</span>
+                            {% endif %}
+                            {% if produit.reappro_recommande_display %}
+                            <div class="small text-muted mt-1">
+                                Suggéré: {{ "{:,.1f}".format(produit.reappro_recommande_display) }}
+                            </div>
                             {% endif %}
                         </td>
                         {% if can('stocks_manage') %}
@@ -165,7 +305,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="{% if can('stocks_manage') %}8{% else %}7{% endif %}" class="text-center py-4 text-muted">
+                        <td colspan="{% if can('stocks_manage') %}9{% else %}8{% endif %}" class="text-center py-4 text-muted">
                             <i class="bi bi-inbox fs-1"></i><br>
                             Aucun produit enregistré
                         </td>
@@ -179,44 +319,96 @@
 
 {% include "_pagination.html" %}
 
-<div class="card shadow-sm">
-    <div class="card-header bg-white">
-        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Derniers mouvements</h5>
+<div class="row">
+    <div class="col-lg-7 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Priorités de réapprovisionnement</h5>
+                <a href="{{ url_for('stocks', etat='a_reappro') }}" class="btn btn-sm btn-outline-primary">Voir tout</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Produit</th>
+                                <th class="text-end">Stock</th>
+                                <th class="text-end">Point commande</th>
+                                <th class="text-end">Couverture</th>
+                                <th class="text-end">Qté suggérée</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for produit in produits_a_reappro %}
+                            <tr>
+                                <td>
+                                    <strong>{{ produit.nom }}</strong>
+                                    <div class="small text-muted">{{ produit.get_methode_reappro_label() }}</div>
+                                </td>
+                                <td class="text-end">{{ "{:,.2f}".format(produit.stock_actuel or 0) }}</td>
+                                <td class="text-end">{{ "{:,.2f}".format(produit.point_commande or 0) }}</td>
+                                <td class="text-end">
+                                    {% if produit.couverture_stock_jours is not none %}
+                                    {{ "{:,.1f}".format(produit.couverture_stock_jours) }} j
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    {% if produit.get_quantite_reappro_recommandee() %}
+                                    {{ "{:,.1f}".format(produit.get_quantite_reappro_recommandee()) }}
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">Aucun réapprovisionnement urgent détecté</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Date</th>
-                        <th>Produit</th>
-                        <th>Type</th>
-                        <th class="text-end">Variation</th>
-                        <th class="text-end">Avant</th>
-                        <th class="text-end">Après</th>
-                        <th>Motif</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for mouvement in mouvements_recents %}
-                    <tr>
-                        <td>{{ mouvement.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
-                        <td>{{ mouvement.produit.nom }}</td>
-                        <td><span class="badge bg-light text-dark">{{ mouvement.type_mouvement }}</span></td>
-                        <td class="text-end {% if mouvement.variation >= 0 %}text-success{% else %}text-danger{% endif %}">
-                            {{ "{:+,.2f}".format(mouvement.variation) }}
-                        </td>
-                        <td class="text-end">{{ "{:,.2f}".format(mouvement.stock_avant) }}</td>
-                        <td class="text-end">{{ "{:,.2f}".format(mouvement.stock_apres) }}</td>
-                        <td>{{ mouvement.motif or '-' }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="7" class="text-center py-4 text-muted">Aucun mouvement enregistré</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+
+    <div class="col-lg-5 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-clock-history"></i> Derniers mouvements</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Date</th>
+                                <th>Produit</th>
+                                <th>Type</th>
+                                <th class="text-end">Variation</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for mouvement in mouvements_recents %}
+                            <tr>
+                                <td>{{ mouvement.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                                <td>{{ mouvement.produit.nom }}</td>
+                                <td><span class="badge bg-light text-dark">{{ mouvement.type_mouvement }}</span></td>
+                                <td class="text-end {% if mouvement.variation >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    {{ "{:+,.2f}".format(mouvement.variation) }}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-center py-4 text-muted">Aucun mouvement enregistré</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 </div>

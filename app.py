@@ -49,6 +49,8 @@ scheduler_lock_handle = None
 ROLE_ADMIN = 'admin'
 ROLE_SPECTATEUR = 'spectateur'
 ROLE_ACHATS = 'achats'
+ROLE_SERVICE_COMPTABLE = 'service_comptable'
+ROLE_SERVICE_MARKETING = 'service_marketing'
 ROLE_GESTIONNAIRE_STOCK = 'gestionnaire_stock'
 ROLE_INGENIEUR = 'ingenieur'
 
@@ -56,6 +58,8 @@ ROLE_LABELS = OrderedDict([
     (ROLE_ADMIN, 'Administrateur'),
     (ROLE_SPECTATEUR, 'Spectateur'),
     (ROLE_ACHATS, 'Achats'),
+    (ROLE_SERVICE_COMPTABLE, 'Service comptable'),
+    (ROLE_SERVICE_MARKETING, 'Service marketing'),
     (ROLE_GESTIONNAIRE_STOCK, 'Gestionnaire de stock'),
     (ROLE_INGENIEUR, 'Ingénieur'),
 ])
@@ -64,9 +68,21 @@ ROLE_HOME_ENDPOINTS = {
     ROLE_ADMIN: 'dashboard',
     ROLE_SPECTATEUR: 'dashboard',
     ROLE_ACHATS: 'commandes',
+    ROLE_SERVICE_COMPTABLE: 'commandes',
+    ROLE_SERVICE_MARKETING: 'commandes',
     ROLE_GESTIONNAIRE_STOCK: 'stocks',
     ROLE_INGENIEUR: 'commandes',
 }
+
+ENTITE_OPTIONS = ['AFRILUX', 'SMART']
+ACHETEUR_OPTIONS = ['GILLES', 'JISLAIN', 'ALAIN']
+COMMANDE_LIST_VIEWS = OrderedDict([
+    ('en_cours', 'Commandes en cours'),
+    ('achevees', 'Commandes achevées'),
+    ('non_payees', 'Commandes non payées'),
+    ('payees', 'Commandes payées'),
+    ('toutes', 'Toutes les commandes'),
+])
 
 SERVICE_DEMANDEUR_OPTIONS = [
     'Achat',
@@ -83,12 +99,33 @@ SERVICE_DEMANDEUR_OPTIONS = [
     'IT & SAV',
 ]
 
+STOCK_TYPE_OPTIONS = OrderedDict([
+    (Produit.TYPE_MATIERE_PREMIERE, 'Matières premières'),
+    (Produit.TYPE_EN_COURS, 'En-cours de production'),
+    (Produit.TYPE_PRODUIT_FINI, 'Produits finis'),
+    (Produit.TYPE_MRO, 'Maintenance / MRO'),
+])
+
+STOCK_REPLENISHMENT_OPTIONS = OrderedDict([
+    (Produit.REAPPRO_POINT_COMMANDE, 'Point de commande'),
+    (Produit.REAPPRO_CALENDAIRE, 'Réapprovisionnement calendaire'),
+    (Produit.REAPPRO_KANBAN, 'Kanban'),
+])
+
+STOCK_VALUATION_OPTIONS = OrderedDict([
+    (Produit.VALORISATION_CUMP, 'CUMP'),
+    (Produit.VALORISATION_FIFO, 'FIFO'),
+    (Produit.VALORISATION_LIFO, 'LIFO'),
+])
+
 ROLE_PERMISSIONS = {
     ROLE_ADMIN: {
         'dashboard_view',
         'dashboard_manage',
         'commandes_view',
         'commandes_manage',
+        'commandes_payment_manage',
+        'commandes_reception_manage',
         'stocks_view',
         'stocks_manage',
         'ventes_view',
@@ -109,8 +146,16 @@ ROLE_PERMISSIONS = {
         'commandes_view',
         'commandes_manage',
     },
+    ROLE_SERVICE_COMPTABLE: {
+        'commandes_view',
+        'commandes_payment_manage',
+    },
+    ROLE_SERVICE_MARKETING: {
+        'commandes_view',
+    },
     ROLE_GESTIONNAIRE_STOCK: {
         'commandes_view',
+        'commandes_reception_manage',
         'stocks_view',
         'stocks_manage',
     },
@@ -299,6 +344,47 @@ def user_has_permission(user, permission):
     return permission in ROLE_PERMISSIONS.get(role, set())
 
 
+def user_has_any_permission(user, *permissions):
+    return any(user_has_permission(user, permission) for permission in permissions)
+
+
+def get_commande_edit_capabilities(user=None):
+    user = user or current_user
+    can_manage_core = user_has_permission(user, 'commandes_manage')
+    can_manage_payment = user_has_any_permission(user, 'commandes_payment_manage', 'commandes_manage')
+    can_manage_reception = user_has_any_permission(user, 'commandes_reception_manage', 'commandes_manage')
+    return {
+        'can_manage_core': can_manage_core,
+        'can_manage_payment': can_manage_payment,
+        'can_manage_reception': can_manage_reception,
+        'can_edit_any': can_manage_core or can_manage_payment or can_manage_reception,
+        'can_delete': can_manage_core,
+    }
+
+
+def commande_completed_expression():
+    return and_(
+        Commande.statut == Commande.STATUT_PAYE,
+        Commande.date_reception.isnot(None),
+        Commande.bon_livraison.isnot(None),
+        func.trim(Commande.bon_livraison) != '',
+    )
+
+
+def commande_in_progress_expression():
+    return or_(
+        Commande.statut.is_(None),
+        Commande.statut != Commande.STATUT_PAYE,
+        Commande.date_reception.is_(None),
+        Commande.bon_livraison.is_(None),
+        func.trim(Commande.bon_livraison) == '',
+    )
+
+
+def normalize_commande_list_view(view):
+    return view if view in COMMANDE_LIST_VIEWS else 'en_cours'
+
+
 def get_home_endpoint_for_user(user=None):
     user = user or current_user
     if not user or not getattr(user, 'is_authenticated', False):
@@ -353,12 +439,16 @@ def utility_processor():
 
     def can(permission):
         return user_has_permission(current_user, permission)
+
+    def can_edit_commande():
+        return get_commande_edit_capabilities(current_user)['can_edit_any']
     
     return dict(
         format_date=format_date,
         format_montant=format_montant,
         page_url=page_url,
         can=can,
+        can_edit_commande=can_edit_commande,
         role_label=lambda role: get_role_label(role),
     )
 
@@ -452,6 +542,27 @@ def valider_quantite(valeur, autoriser_negative=False):
 
     return quantite
 
+
+def valider_nombre_non_negatif(valeur, champ):
+    """Valide un nombre positif ou nul."""
+    if valeur in (None, ''):
+        return 0.0
+    try:
+        nombre = float(valeur)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{champ} invalide") from exc
+    if nombre < 0:
+        raise ValueError(f"{champ} ne peut pas être négatif")
+    return nombre
+
+
+def valider_taux_pourcentage(valeur, champ):
+    """Valide un taux en pourcentage entre 0 et 100."""
+    taux = valider_nombre_non_negatif(valeur, champ)
+    if taux > 100:
+        raise ValueError(f"{champ} doit être compris entre 0 et 100")
+    return taux
+
 def valider_note_fournisseur(valeur, champ='Note'):
     """Valide une note fournisseur sur 5."""
     if valeur in (None, ''):
@@ -474,6 +585,127 @@ def valider_service_demandeur(valeur):
     return service
 
 
+def valider_choix_liste(valeur, options, champ, obligatoire=False):
+    selected_value = (valeur or '').strip()
+    if not selected_value:
+        if obligatoire:
+            raise ValueError(f'{champ} obligatoire')
+        return None
+    if selected_value not in options:
+        raise ValueError(f'{champ} invalide')
+    return selected_value
+
+
+def valider_texte_requis(valeur, champ):
+    text_value = (valeur or '').strip()
+    if not text_value:
+        raise ValueError(f'{champ} obligatoire')
+    return text_value
+
+
+def nettoyer_texte_optionnel(valeur):
+    text_value = (valeur or '').strip()
+    return text_value or None
+
+
+def parse_commande_date_input(valeur, champ, obligatoire=False):
+    text_value = (valeur or '').strip()
+    if not text_value:
+        if obligatoire:
+            raise ValueError(f'{champ} obligatoire')
+        return None
+    try:
+        return datetime.strptime(text_value, '%Y-%m-%d').date()
+    except ValueError as exc:
+        raise ValueError(f'{champ} invalide') from exc
+
+
+def parse_commande_numero(valeur):
+    text_value = (valeur or '').strip()
+    if not text_value:
+        return None
+    try:
+        return int(text_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Numéro de commande invalide') from exc
+
+
+def parse_commande_fournisseur_id(valeur, obligatoire=False):
+    text_value = (valeur or '').strip()
+    if not text_value:
+        if obligatoire:
+            raise ValueError('Fournisseur obligatoire')
+        return None
+    if not text_value.isdigit():
+        raise ValueError('Fournisseur invalide')
+    return int(text_value)
+
+
+def validate_commande_workflow_state(montant, avance, date_paiement=None, facture=None, date_reception=None, bon_livraison=None):
+    if avance > montant:
+        raise ValueError("L'avance ne peut pas être supérieure au montant")
+
+    cleaned_facture = nettoyer_texte_optionnel(facture)
+    cleaned_bon_livraison = nettoyer_texte_optionnel(bon_livraison)
+
+    if bool(date_paiement) != bool(cleaned_facture):
+        raise ValueError('Le paiement requiert à la fois une date de paiement et un numéro de facture')
+    if date_paiement and avance < montant:
+        raise ValueError('Le paiement final exige une avance cumulée égale au montant de la commande')
+    if bool(date_reception) != bool(cleaned_bon_livraison):
+        raise ValueError('La réception requiert à la fois une date réelle et un numéro de bon de livraison')
+
+    return cleaned_facture, cleaned_bon_livraison
+
+
+def get_commande_form_values(commande=None, form_data=None):
+    def field_value(field_name, default=''):
+        if form_data is not None and field_name in form_data:
+            return form_data.get(field_name)
+        value = getattr(commande, field_name, None) if commande else None
+        return value if value is not None else default
+
+    def date_value(field_name):
+        raw_value = field_value(field_name)
+        if not raw_value:
+            return ''
+        if isinstance(raw_value, date):
+            return raw_value.strftime('%Y-%m-%d')
+        return str(raw_value)
+
+    def checkbox_value(field_name, default=False):
+        if form_data is not None and field_name in form_data:
+            return field_name in form_data
+        if commande is not None and getattr(commande, field_name, None) is not None:
+            return bool(getattr(commande, field_name))
+        return default
+
+    fournisseur_id = field_value('fournisseur_id', '')
+    return {
+        'nr': field_value('nr', ''),
+        'date_cde': date_value('date_cde'),
+        'entite': field_value('entite', ''),
+        'acheteur': field_value('acheteur', ''),
+        'service_demandeur': field_value('service_demandeur', ''),
+        'demandeur': field_value('demandeur', ''),
+        'fournisseur_id': str(fournisseur_id) if fournisseur_id not in (None, '') else '',
+        'bon_commande': field_value('bon_commande', ''),
+        'affaire': field_value('affaire', ''),
+        'montant': field_value('montant', ''),
+        'avance': field_value('avance', ''),
+        'date_livraison': date_value('date_livraison'),
+        'date_paiement': date_value('date_paiement'),
+        'facture': field_value('facture', ''),
+        'date_reception': date_value('date_reception'),
+        'bon_livraison': field_value('bon_livraison', ''),
+        'commentaire': field_value('commentaire', ''),
+        'commande_conforme': checkbox_value('commande_conforme', default=True),
+        'rupture_fournisseur': checkbox_value('rupture_fournisseur', default=False),
+        'note_fournisseur': field_value('note_fournisseur', ''),
+        'note_service': field_value('note_service', ''),
+    }
+
+
 def get_product_category_catalog():
     """Retourne le référentiel familles/catégories des produits."""
     return get_category_catalog(
@@ -491,10 +723,19 @@ def get_product_form_values(produit=None, form_data=None):
             'description': (form_data.get('description') or '').strip(),
             'famille': (form_data.get('famille') or '').strip(),
             'categorie': (form_data.get('categorie') or '').strip(),
+            'type_stock': (form_data.get('type_stock') or Produit.TYPE_PRODUIT_FINI).strip(),
+            'methode_reappro': (form_data.get('methode_reappro') or Produit.REAPPRO_POINT_COMMANDE).strip(),
+            'methode_valorisation': (form_data.get('methode_valorisation') or Produit.VALORISATION_CUMP).strip(),
             'unite': (form_data.get('unite') or '').strip(),
             'prix_unitaire': form_data.get('prix_unitaire', ''),
             'stock_initial': form_data.get('stock_initial', 0),
             'stock_minimum': form_data.get('stock_minimum', 0),
+            'stock_securite': form_data.get('stock_securite', 0),
+            'delai_approvisionnement_jours': form_data.get('delai_approvisionnement_jours', 0),
+            'periodicite_reappro_jours': form_data.get('periodicite_reappro_jours', 0),
+            'consommation_moyenne_journaliere': form_data.get('consommation_moyenne_journaliere', 0),
+            'cout_passation_commande': form_data.get('cout_passation_commande', 0),
+            'taux_possession_annuel': form_data.get('taux_possession_annuel', 25),
             'actif': bool(form_data.get('actif', True)),
         }
         return values
@@ -506,10 +747,19 @@ def get_product_form_values(produit=None, form_data=None):
             'description': produit.description or '',
             'famille': produit.famille or '',
             'categorie': produit.categorie or '',
+            'type_stock': produit.type_stock or Produit.TYPE_PRODUIT_FINI,
+            'methode_reappro': produit.methode_reappro or Produit.REAPPRO_POINT_COMMANDE,
+            'methode_valorisation': produit.methode_valorisation or Produit.VALORISATION_CUMP,
             'unite': produit.unite or '',
             'prix_unitaire': produit.prix_unitaire if produit.prix_unitaire is not None else 0,
             'stock_initial': 0,
             'stock_minimum': produit.stock_minimum if produit.stock_minimum is not None else 0,
+            'stock_securite': produit.stock_securite if produit.stock_securite is not None else 0,
+            'delai_approvisionnement_jours': produit.delai_approvisionnement_jours if produit.delai_approvisionnement_jours is not None else 0,
+            'periodicite_reappro_jours': produit.periodicite_reappro_jours if produit.periodicite_reappro_jours is not None else 0,
+            'consommation_moyenne_journaliere': produit.consommation_moyenne_journaliere if produit.consommation_moyenne_journaliere is not None else 0,
+            'cout_passation_commande': produit.cout_passation_commande if produit.cout_passation_commande is not None else 0,
+            'taux_possession_annuel': produit.taux_possession_annuel if produit.taux_possession_annuel is not None else 25,
             'actif': bool(produit.actif),
         }
 
@@ -519,10 +769,19 @@ def get_product_form_values(produit=None, form_data=None):
         'description': '',
         'famille': '',
         'categorie': '',
+        'type_stock': Produit.TYPE_PRODUIT_FINI,
+        'methode_reappro': Produit.REAPPRO_POINT_COMMANDE,
+        'methode_valorisation': Produit.VALORISATION_CUMP,
         'unite': '',
         'prix_unitaire': 0,
         'stock_initial': 0,
         'stock_minimum': 0,
+        'stock_securite': 0,
+        'delai_approvisionnement_jours': 0,
+        'periodicite_reappro_jours': 0,
+        'consommation_moyenne_journaliere': 0,
+        'cout_passation_commande': 0,
+        'taux_possession_annuel': 25,
         'actif': True,
     }
 
@@ -609,6 +868,112 @@ def sync_existing_product_taxonomy():
     if updated or cleared_subcategories:
         db.session.commit()
         print(f"Taxonomie produit synchronisée: {updated} famille(s) et {cleared_subcategories} sous-catégorie(s) nettoyées")
+
+
+def build_stock_abc_map(produits):
+    """Classe les produits actifs selon la méthode ABC sur la valeur de stock."""
+    actifs = [produit for produit in produits if produit.actif]
+    ranked = sorted(actifs, key=lambda produit: float(produit.valeur_stock or 0), reverse=True)
+    total_value = sum(float(produit.valeur_stock or 0) for produit in ranked)
+    abc_map = {}
+    counts = {'A': 0, 'B': 0, 'C': 0}
+    cumulative_value = 0.0
+
+    for produit in ranked:
+        cumulative_before = cumulative_value
+        cumulative_value += float(produit.valeur_stock or 0)
+
+        if total_value <= 0:
+            classe = 'C'
+        else:
+            cumulative_ratio_before = (cumulative_before / total_value) * 100
+            if cumulative_ratio_before < 80:
+                classe = 'A'
+            elif cumulative_ratio_before < 95:
+                classe = 'B'
+            else:
+                classe = 'C'
+
+        abc_map[produit.id] = classe
+        counts[classe] += 1
+
+    return abc_map, counts
+
+
+def annotate_stock_products(produits, abc_map):
+    """Ajoute des indicateurs calculés aux produits pour l'affichage."""
+    for produit in produits:
+        produit.abc_classe = abc_map.get(produit.id, 'C')
+        produit.etat_stock = produit.get_etat_stock()
+        produit.couverture_stock_jours_display = produit.couverture_stock_jours
+        produit.qec_display = produit.quantite_economique_commande
+        produit.point_commande_display = produit.point_commande
+        produit.reappro_recommande_display = produit.get_quantite_reappro_recommandee()
+    return produits
+
+
+def build_stock_management_summary():
+    """Construit les KPI métier de gestion des stocks."""
+    produits_actifs = Produit.query.filter(Produit.actif.is_(True)).all()
+    abc_map, abc_counts = build_stock_abc_map(produits_actifs)
+    annotate_stock_products(produits_actifs, abc_map)
+
+    total_value = sum(float(produit.valeur_stock or 0) for produit in produits_actifs)
+    nb_ruptures = sum(1 for produit in produits_actifs if produit.est_en_rupture())
+    nb_stock_faible = sum(1 for produit in produits_actifs if produit.est_stock_faible())
+    nb_a_reappro = sum(1 for produit in produits_actifs if produit.doit_etre_reapprovisionne())
+    couverture_values = [
+        produit.couverture_stock_jours
+        for produit in produits_actifs
+        if produit.couverture_stock_jours is not None
+    ]
+    couverture_moyenne = average_non_null(*couverture_values)
+    cout_possession_estime = sum(
+        float(produit.valeur_stock or 0) * float(produit.taux_possession_annuel or 0) / 100
+        for produit in produits_actifs
+    )
+    taux_service_stock = ((len(produits_actifs) - nb_ruptures) / len(produits_actifs) * 100) if produits_actifs else 0
+
+    annual_period_start = date.today() - timedelta(days=365)
+    cout_sorties_annuel = db.session.query(
+        func.coalesce(func.sum(LigneVente.quantite * Produit.prix_unitaire), 0)
+    ).select_from(
+        LigneVente
+    ).join(
+        Vente,
+        LigneVente.vente_id == Vente.id,
+    ).join(
+        Produit,
+        LigneVente.produit_id == Produit.id,
+    ).filter(
+        Vente.date_vente >= annual_period_start
+    ).scalar() or 0
+    rotation_estimee = (cout_sorties_annuel / total_value) if total_value else None
+
+    produits_a_reappro = sorted(
+        [produit for produit in produits_actifs if produit.doit_etre_reapprovisionne()],
+        key=lambda produit: (
+            0 if produit.est_en_rupture() else 1,
+            produit.couverture_stock_jours if produit.couverture_stock_jours is not None else float('inf'),
+            -float(produit.valeur_stock or 0),
+        ),
+    )
+
+    return {
+        'abc_map': abc_map,
+        'abc_counts': abc_counts,
+        'valeur_stock': total_value,
+        'nb_ruptures': nb_ruptures,
+        'nb_stock_faible': nb_stock_faible,
+        'nb_a_reappro': nb_a_reappro,
+        'couverture_moyenne': round(couverture_moyenne, 1) if couverture_moyenne is not None else None,
+        'cout_possession_estime': cout_possession_estime,
+        'taux_service_stock': round(taux_service_stock, 1),
+        'rotation_estimee': round(rotation_estimee, 2) if rotation_estimee is not None else None,
+        'cout_sorties_annuel': cout_sorties_annuel,
+        'produits_a_reappro_all': produits_a_reappro,
+        'produits_a_reappro': produits_a_reappro[:8],
+    }
 
 
 def normalize_import_column_name(value):
@@ -3277,8 +3642,6 @@ def build_dashboard_excel_bytes(filters, context=None):
         'Date livraison': commande.date_livraison,
         'Date réception': commande.date_reception,
         'Montant': commande.montant,
-        'Prix référence marché': commande.prix_reference_marche,
-        'Écart prix marché %': commande.get_ecart_prix_marche_pct(),
         'Avance': commande.avance,
         'Solde': commande.solde,
         'Conforme': commande.commande_conforme,
@@ -3286,6 +3649,8 @@ def build_dashboard_excel_bytes(filters, context=None):
         'Note performance': commande.note_fournisseur,
         'Note SAV': commande.note_service,
         'Statut': commande.statut,
+        'Avancement': commande.get_statut_avancement(),
+        'Niveau processus': commande.get_niveau_processus(),
         'Date paiement': commande.date_paiement,
     } for commande in commandes]
 
@@ -4338,6 +4703,7 @@ def commandes():
         return denied_response
 
     # Récupération des filtres
+    vue = normalize_commande_list_view(request.args.get('vue', 'en_cours'))
     entite = request.args.get('entite', '')
     statut = request.args.get('statut', '')
     acheteur = request.args.get('acheteur', '')
@@ -4345,22 +4711,44 @@ def commandes():
     recherche = request.args.get('recherche', '')
     page = get_requested_page()
     
-    query = Commande.query.options(selectinload(Commande.fournisseur))
+    base_query = Commande.query.options(selectinload(Commande.fournisseur))
     
     if entite:
-        query = query.filter(Commande.entite == entite)
+        base_query = base_query.filter(Commande.entite == entite)
     if statut in {Commande.STATUT_PAYE, Commande.STATUT_A_PAYER}:
-        query = query.filter(Commande.statut == statut)
+        base_query = base_query.filter(Commande.statut == statut)
     if acheteur:
-        query = query.filter(Commande.acheteur == acheteur)
+        base_query = base_query.filter(Commande.acheteur == acheteur)
     if fournisseur and fournisseur.isdigit():
-        query = query.filter(Commande.fournisseur_id == int(fournisseur))
+        base_query = base_query.filter(Commande.fournisseur_id == int(fournisseur))
     if recherche:
-        query = query.filter(
-            Commande.affaire.contains(recherche) | 
-            Commande.demandeur.contains(recherche) |
-            Commande.bon_commande.contains(recherche)
+        base_query = base_query.filter(
+            or_(
+                Commande.affaire.contains(recherche),
+                Commande.demandeur.contains(recherche),
+                Commande.service_demandeur.contains(recherche),
+                Commande.bon_commande.contains(recherche),
+                Commande.facture.contains(recherche),
+            )
         )
+
+    view_counts = {
+        'toutes': base_query.count(),
+        'non_payees': base_query.filter(Commande.statut == Commande.STATUT_A_PAYER).count(),
+        'payees': base_query.filter(Commande.statut == Commande.STATUT_PAYE).count(),
+        'achevees': base_query.filter(commande_completed_expression()).count(),
+        'en_cours': base_query.filter(commande_in_progress_expression()).count(),
+    }
+
+    query = base_query
+    if vue == 'non_payees':
+        query = query.filter(Commande.statut == Commande.STATUT_A_PAYER)
+    elif vue == 'payees':
+        query = query.filter(Commande.statut == Commande.STATUT_PAYE)
+    elif vue == 'achevees':
+        query = query.filter(commande_completed_expression())
+    elif vue == 'en_cours':
+        query = query.filter(commande_in_progress_expression())
     
     commandes_pagination = query.order_by(Commande.date_cde.desc()).paginate(
         page=page,
@@ -4381,13 +4769,19 @@ def commandes():
                          acheteurs=[a[0] for a in acheteurs if a[0]],
                          fournisseurs=fournisseurs,
                          filtres={
+                             'vue': vue,
                              'entite': entite,
                              'statut': statut,
                              'acheteur': acheteur,
                              'fournisseur': fournisseur,
                              'recherche': recherche,
                          },
-                         pagination=commandes_pagination)
+                         pagination=commandes_pagination,
+                         selected_view=vue,
+                         selected_view_label=COMMANDE_LIST_VIEWS[vue],
+                         view_labels=COMMANDE_LIST_VIEWS,
+                         view_counts=view_counts,
+                         commande_capabilities=get_commande_edit_capabilities())
 
 @app.route('/commande/ajouter', methods=['GET', 'POST'])
 @login_required
@@ -4398,49 +4792,65 @@ def ajouter_commande():
 
     ensure_supplier_reference_data()
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
+    commande_capabilities = get_commande_edit_capabilities()
+    form_values = get_commande_form_values(form_data=request.form if request.method == 'POST' else None)
     
     if request.method == 'POST':
         try:
-            # Validation des montants
-            montant = valider_montant(request.form.get('montant', 0))
-            avance = valider_montant(request.form.get('avance', 0))
-            prix_reference_marche = valider_montant(request.form.get('prix_reference_marche', 0))
+            montant_input = (request.form.get('montant') or '').strip()
+            avance_input = (request.form.get('avance') or '').strip()
+            if not montant_input:
+                raise ValueError('Montant obligatoire')
+            if not avance_input:
+                raise ValueError('Avance obligatoire')
+
+            montant = valider_montant(montant_input)
+            avance = valider_montant(avance_input)
             note_fournisseur = valider_note_fournisseur(request.form.get('note_fournisseur'), 'Note performance')
             note_service = valider_note_fournisseur(request.form.get('note_service'), 'Note SAV')
             service_demandeur = valider_service_demandeur(request.form.get('service_demandeur'))
-            
-            # Vérifier que avance <= montant
-            if avance > montant:
-                flash('L\'avance ne peut pas être supérieure au montant', 'danger')
-                return render_template('admin/commande_form.html', 
-                                     fournisseurs=fournisseurs, 
-                                     commande=None,
-                                     services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
-                                     titre="Ajouter une commande")
+            if not service_demandeur:
+                raise ValueError('Service demandeur obligatoire')
+
+            date_paiement = parse_commande_date_input(
+                request.form.get('date_paiement'),
+                'Date paiement',
+            ) if commande_capabilities['can_manage_payment'] else None
+            date_reception = parse_commande_date_input(
+                request.form.get('date_reception'),
+                'Date réception réelle',
+            ) if commande_capabilities['can_manage_reception'] else None
+            facture, bon_livraison = validate_commande_workflow_state(
+                montant,
+                avance,
+                date_paiement=date_paiement,
+                facture=request.form.get('facture'),
+                date_reception=date_reception,
+                bon_livraison=request.form.get('bon_livraison'),
+            )
             
             commande = Commande(
-                nr=request.form.get('nr', 0),
-                date_cde=datetime.strptime(request.form['date_cde'], '%Y-%m-%d').date() if request.form.get('date_cde') else None,
-                entite=request.form.get('entite'),
-                demandeur=request.form.get('demandeur'),
+                nr=parse_commande_numero(request.form.get('nr')),
+                date_cde=parse_commande_date_input(request.form.get('date_cde'), 'Date commande', obligatoire=True),
+                entite=valider_choix_liste(request.form.get('entite'), ENTITE_OPTIONS, 'Entité', obligatoire=True),
+                demandeur=valider_texte_requis(request.form.get('demandeur'), 'Demandeur'),
                 service_demandeur=service_demandeur,
-                acheteur=request.form.get('acheteur'),
-                fournisseur_id=int(request.form['fournisseur_id']) if request.form.get('fournisseur_id') else None,
-                affaire=request.form.get('affaire'),
-                bon_commande=request.form.get('bon_commande'),
-                date_livraison=datetime.strptime(request.form['date_livraison'], '%Y-%m-%d').date() if request.form.get('date_livraison') else None,
-                date_reception=datetime.strptime(request.form['date_reception'], '%Y-%m-%d').date() if request.form.get('date_reception') else None,
-                bon_livraison=request.form.get('bon_livraison'),
-                facture=request.form.get('facture'),
+                acheteur=valider_choix_liste(request.form.get('acheteur'), ACHETEUR_OPTIONS, 'Acheteur', obligatoire=True),
+                fournisseur_id=parse_commande_fournisseur_id(request.form.get('fournisseur_id'), obligatoire=True),
+                affaire=valider_texte_requis(request.form.get('affaire'), 'Affaire / Description'),
+                bon_commande=valider_texte_requis(request.form.get('bon_commande'), 'N° Bon commande'),
+                date_livraison=parse_commande_date_input(request.form.get('date_livraison'), 'Date livraison', obligatoire=True),
+                date_reception=date_reception,
+                bon_livraison=bon_livraison,
+                facture=facture,
                 montant=montant,
                 avance=avance,
-                prix_reference_marche=prix_reference_marche or 0,
                 commande_conforme='commande_conforme' in request.form,
                 rupture_fournisseur='rupture_fournisseur' in request.form,
                 note_fournisseur=note_fournisseur,
                 note_service=note_service,
-                date_paiement=datetime.strptime(request.form['date_paiement'], '%Y-%m-%d').date() if request.form.get('date_paiement') else None,
-                commentaire=request.form.get('commentaire')
+                date_paiement=date_paiement,
+                commentaire=nettoyer_texte_optionnel(request.form.get('commentaire')),
             )
             commande.calculer_solde()
             db.session.add(commande)
@@ -4468,61 +4878,100 @@ def ajouter_commande():
     return render_template('admin/commande_form.html', 
                          fournisseurs=fournisseurs, 
                          commande=None,
+                         form_values=form_values,
+                         commande_capabilities=commande_capabilities,
+                         entite_options=ENTITE_OPTIONS,
+                         acheteur_options=ACHETEUR_OPTIONS,
                          services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
                          titre="Ajouter une commande")
 
 @app.route('/commande/modifier/<int:id>', methods=['GET', 'POST'])
 @login_required
 def modifier_commande(id):
-    denied_response = require_permission('commandes_manage', 'commandes')
-    if denied_response:
-        return denied_response
+    commande_capabilities = get_commande_edit_capabilities()
+    if not commande_capabilities['can_edit_any']:
+        return redirect_access_denied('commandes')
 
     ensure_supplier_reference_data()
     commande = Commande.query.get_or_404(id)
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
+    form_values = get_commande_form_values(commande, request.form if request.method == 'POST' else None)
     
     if request.method == 'POST':
         try:
-            # Validation des montants
-            montant = valider_montant(request.form.get('montant', 0))
-            avance = valider_montant(request.form.get('avance', 0))
-            prix_reference_marche = valider_montant(request.form.get('prix_reference_marche', 0))
-            note_fournisseur = valider_note_fournisseur(request.form.get('note_fournisseur'), 'Note performance')
-            note_service = valider_note_fournisseur(request.form.get('note_service'), 'Note SAV')
-            service_demandeur = valider_service_demandeur(request.form.get('service_demandeur'))
-            
-            # Vérifier que avance <= montant
-            if avance > montant:
-                flash('L\'avance ne peut pas être supérieure au montant', 'danger')
-                return render_template('admin/commande_form.html', 
-                                     commande=commande, 
-                                     fournisseurs=fournisseurs,
-                                     services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
-                                     titre="Modifier la commande")
-            
-            commande.nr = request.form.get('nr', 0)
-            commande.date_cde = datetime.strptime(request.form['date_cde'], '%Y-%m-%d').date() if request.form.get('date_cde') else None
-            commande.entite = request.form.get('entite')
-            commande.demandeur = request.form.get('demandeur')
-            commande.service_demandeur = service_demandeur
-            commande.acheteur = request.form.get('acheteur')
-            commande.fournisseur_id = int(request.form['fournisseur_id']) if request.form.get('fournisseur_id') else None
-            commande.affaire = request.form.get('affaire')
-            commande.bon_commande = request.form.get('bon_commande')
-            commande.date_livraison = datetime.strptime(request.form['date_livraison'], '%Y-%m-%d').date() if request.form.get('date_livraison') else None
-            commande.date_reception = datetime.strptime(request.form['date_reception'], '%Y-%m-%d').date() if request.form.get('date_reception') else None
-            commande.bon_livraison = request.form.get('bon_livraison')
-            commande.facture = request.form.get('facture')
-            commande.montant = montant
-            commande.avance = avance
-            commande.prix_reference_marche = prix_reference_marche or 0
-            commande.commande_conforme = 'commande_conforme' in request.form
-            commande.rupture_fournisseur = 'rupture_fournisseur' in request.form
-            commande.note_fournisseur = note_fournisseur
-            commande.note_service = note_service
-            commande.date_paiement = datetime.strptime(request.form['date_paiement'], '%Y-%m-%d').date() if request.form.get('date_paiement') else None
-            commande.commentaire = request.form.get('commentaire')
+            updated_values = {}
+
+            if commande_capabilities['can_manage_core']:
+                service_demandeur = valider_service_demandeur(request.form.get('service_demandeur'))
+                if not service_demandeur:
+                    raise ValueError('Service demandeur obligatoire')
+
+                montant_input = (request.form.get('montant') or '').strip()
+                if not montant_input:
+                    raise ValueError('Montant obligatoire')
+
+                updated_values.update({
+                    'nr': parse_commande_numero(request.form.get('nr')),
+                    'date_cde': parse_commande_date_input(request.form.get('date_cde'), 'Date commande', obligatoire=True),
+                    'entite': valider_choix_liste(request.form.get('entite'), ENTITE_OPTIONS, 'Entité', obligatoire=True),
+                    'demandeur': valider_texte_requis(request.form.get('demandeur'), 'Demandeur'),
+                    'service_demandeur': service_demandeur,
+                    'acheteur': valider_choix_liste(request.form.get('acheteur'), ACHETEUR_OPTIONS, 'Acheteur', obligatoire=True),
+                    'fournisseur_id': parse_commande_fournisseur_id(request.form.get('fournisseur_id'), obligatoire=True),
+                    'affaire': valider_texte_requis(request.form.get('affaire'), 'Affaire / Description'),
+                    'bon_commande': valider_texte_requis(request.form.get('bon_commande'), 'N° Bon commande'),
+                    'date_livraison': parse_commande_date_input(request.form.get('date_livraison'), 'Date livraison', obligatoire=True),
+                    'montant': valider_montant(montant_input),
+                    'commande_conforme': 'commande_conforme' in request.form,
+                    'rupture_fournisseur': 'rupture_fournisseur' in request.form,
+                    'note_fournisseur': valider_note_fournisseur(request.form.get('note_fournisseur'), 'Note performance'),
+                    'note_service': valider_note_fournisseur(request.form.get('note_service'), 'Note SAV'),
+                    'commentaire': nettoyer_texte_optionnel(request.form.get('commentaire')),
+                })
+
+            can_manage_advance = commande_capabilities['can_manage_core'] or commande_capabilities['can_manage_payment']
+            if can_manage_advance and 'avance' in request.form:
+                avance_input = (request.form.get('avance') or '').strip()
+                if not avance_input:
+                    raise ValueError('Avance obligatoire')
+                updated_values['avance'] = valider_montant(avance_input)
+
+            if commande_capabilities['can_manage_payment']:
+                updated_values['date_paiement'] = parse_commande_date_input(
+                    request.form.get('date_paiement'),
+                    'Date paiement',
+                )
+                updated_values['facture'] = request.form.get('facture')
+
+            if commande_capabilities['can_manage_reception']:
+                updated_values['date_reception'] = parse_commande_date_input(
+                    request.form.get('date_reception'),
+                    'Date réception réelle',
+                )
+                updated_values['bon_livraison'] = request.form.get('bon_livraison')
+
+            target_montant = updated_values.get('montant', float(commande.montant or 0))
+            target_avance = updated_values.get('avance', float(commande.avance or 0))
+            target_date_paiement = updated_values.get('date_paiement', commande.date_paiement)
+            target_facture = updated_values.get('facture', commande.facture)
+            target_date_reception = updated_values.get('date_reception', commande.date_reception)
+            target_bon_livraison = updated_values.get('bon_livraison', commande.bon_livraison)
+            cleaned_facture, cleaned_bon_livraison = validate_commande_workflow_state(
+                target_montant,
+                target_avance,
+                date_paiement=target_date_paiement,
+                facture=target_facture,
+                date_reception=target_date_reception,
+                bon_livraison=target_bon_livraison,
+            )
+
+            if 'facture' in updated_values:
+                updated_values['facture'] = cleaned_facture
+            if 'bon_livraison' in updated_values:
+                updated_values['bon_livraison'] = cleaned_bon_livraison
+
+            for field_name, field_value in updated_values.items():
+                setattr(commande, field_name, field_value)
             commande.calculer_solde()
             
             db.session.commit()
@@ -4548,7 +4997,11 @@ def modifier_commande(id):
     
     return render_template('admin/commande_form.html', 
                          commande=commande, 
+                         form_values=form_values,
                          fournisseurs=fournisseurs,
+                         commande_capabilities=commande_capabilities,
+                         entite_options=ENTITE_OPTIONS,
+                         acheteur_options=ACHETEUR_OPTIONS,
                          services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
                          titre="Modifier la commande")
 
@@ -4592,7 +5045,11 @@ def voir_commande(id):
         return denied_response
 
     commande = Commande.query.get_or_404(id)
-    return render_template('commande_detail.html', commande=commande)
+    return render_template(
+        'commande_detail.html',
+        commande=commande,
+        commande_capabilities=get_commande_edit_capabilities(),
+    )
 
 # ==================== ROUTES FOURNISSEURS ====================
 
@@ -4755,8 +5212,12 @@ def stocks():
     recherche = (request.args.get('recherche') or '').strip()
     famille = (request.args.get('famille') or '').strip()
     categorie = (request.args.get('categorie') or '').strip()
+    type_stock = (request.args.get('type_stock') or '').strip()
+    classe_abc = (request.args.get('classe_abc') or '').strip().upper()
     etat = (request.args.get('etat') or '').strip()
     page = get_requested_page()
+    stock_summary = build_stock_management_summary()
+    abc_map = stock_summary['abc_map']
 
     query = Produit.query
 
@@ -4776,6 +5237,16 @@ def stocks():
     if categorie:
         query = query.filter(Produit.categorie == categorie)
 
+    if type_stock in STOCK_TYPE_OPTIONS:
+        query = query.filter(Produit.type_stock == type_stock)
+
+    if classe_abc in {'A', 'B', 'C'}:
+        matching_ids = [produit_id for produit_id, abc_class in abc_map.items() if abc_class == classe_abc]
+        if matching_ids:
+            query = query.filter(Produit.id.in_(matching_ids))
+        else:
+            query = query.filter(Produit.id == -1)
+
     if etat == 'actif':
         query = query.filter(Produit.actif.is_(True))
     elif etat == 'faible':
@@ -4785,6 +5256,12 @@ def stocks():
         )
     elif etat == 'rupture':
         query = query.filter(Produit.actif.is_(True), Produit.stock_actuel <= 0)
+    elif etat == 'a_reappro':
+        reappro_ids = [produit.id for produit in stock_summary['produits_a_reappro_all']]
+        if reappro_ids:
+            query = query.filter(Produit.id.in_(reappro_ids))
+        else:
+            query = query.filter(Produit.id == -1)
     elif etat == 'inactif':
         query = query.filter(Produit.actif.is_(False))
 
@@ -4793,7 +5270,7 @@ def stocks():
         per_page=app.config.get('DEFAULT_PAGE_SIZE', 25),
         error_out=False,
     )
-    produits = produits_pagination.items
+    produits = annotate_stock_products(produits_pagination.items, abc_map)
     familles = db.session.query(Produit.famille)\
         .filter(Produit.famille.isnot(None), Produit.famille != '')\
         .distinct()\
@@ -4808,23 +5285,32 @@ def stocks():
         joinedload(MouvementStock.produit)
     ).order_by(MouvementStock.created_at.desc()).limit(10).all()
     total_produits = db.session.query(func.count(Produit.id)).filter(Produit.actif.is_(True)).scalar() or 0
-    valeur_stock = db.session.query(
-        func.coalesce(func.sum((Produit.stock_actuel * Produit.prix_unitaire)), 0)
-    ).filter(Produit.actif.is_(True)).scalar() or 0
-    nb_stock_faible = db.session.query(func.count(Produit.id)).filter(
-        Produit.actif.is_(True),
-        Produit.stock_actuel <= Produit.stock_minimum
-    ).scalar() or 0
 
     return render_template(
         'stocks/index.html',
         produits=produits,
         familles=[f[0] for f in familles],
         categories=[c[0] for c in categories],
-        filtres={'recherche': recherche, 'famille': famille, 'categorie': categorie, 'etat': etat},
+        filtres={
+            'recherche': recherche,
+            'famille': famille,
+            'categorie': categorie,
+            'type_stock': type_stock,
+            'classe_abc': classe_abc,
+            'etat': etat,
+        },
         total_produits=total_produits,
-        valeur_stock=valeur_stock,
-        nb_stock_faible=nb_stock_faible,
+        valeur_stock=stock_summary['valeur_stock'],
+        nb_stock_faible=stock_summary['nb_stock_faible'],
+        nb_ruptures=stock_summary['nb_ruptures'],
+        nb_a_reappro=stock_summary['nb_a_reappro'],
+        couverture_moyenne=stock_summary['couverture_moyenne'],
+        taux_service_stock=stock_summary['taux_service_stock'],
+        rotation_estimee=stock_summary['rotation_estimee'],
+        cout_possession_estime=stock_summary['cout_possession_estime'],
+        abc_counts=stock_summary['abc_counts'],
+        produits_a_reappro=stock_summary['produits_a_reappro'],
+        stock_type_options=STOCK_TYPE_OPTIONS,
         mouvements_recents=mouvements_recents,
         pagination=produits_pagination,
     )
@@ -4922,10 +5408,19 @@ def ajouter_produit():
             'description': request.form.get('description'),
             'famille': request.form.get('famille'),
             'categorie': request.form.get('categorie'),
+            'type_stock': request.form.get('type_stock'),
+            'methode_reappro': request.form.get('methode_reappro'),
+            'methode_valorisation': request.form.get('methode_valorisation'),
             'unite': request.form.get('unite'),
             'prix_unitaire': request.form.get('prix_unitaire', 0),
             'stock_initial': request.form.get('stock_initial', 0),
             'stock_minimum': request.form.get('stock_minimum', 0),
+            'stock_securite': request.form.get('stock_securite', 0),
+            'delai_approvisionnement_jours': request.form.get('delai_approvisionnement_jours', 0),
+            'periodicite_reappro_jours': request.form.get('periodicite_reappro_jours', 0),
+            'consommation_moyenne_journaliere': request.form.get('consommation_moyenne_journaliere', 0),
+            'cout_passation_commande': request.form.get('cout_passation_commande', 0),
+            'taux_possession_annuel': request.form.get('taux_possession_annuel', 25),
             'actif': 'actif' in request.form,
         })
         try:
@@ -4936,20 +5431,44 @@ def ajouter_produit():
                 form_values['famille'],
                 form_values['categorie'],
             )
+            type_stock = valider_choix_liste(
+                form_values['type_stock'],
+                list(STOCK_TYPE_OPTIONS.keys()),
+                'Type de stock',
+                obligatoire=True,
+            )
+            methode_reappro = valider_choix_liste(
+                form_values['methode_reappro'],
+                list(STOCK_REPLENISHMENT_OPTIONS.keys()),
+                'Méthode de réapprovisionnement',
+                obligatoire=True,
+            )
+            methode_valorisation = valider_choix_liste(
+                form_values['methode_valorisation'],
+                list(STOCK_VALUATION_OPTIONS.keys()),
+                'Méthode de valorisation',
+                obligatoire=True,
+            )
             unite = form_values['unite'] or None
             prix_unitaire = valider_montant(request.form.get('prix_unitaire', 0))
-            stock_initial = float(request.form.get('stock_initial') or 0)
-            stock_minimum = float(request.form.get('stock_minimum') or 0)
+            stock_initial = valider_nombre_non_negatif(request.form.get('stock_initial'), 'Stock initial')
+            stock_minimum = valider_nombre_non_negatif(request.form.get('stock_minimum'), 'Stock minimum')
+            stock_securite = valider_nombre_non_negatif(request.form.get('stock_securite'), 'Stock de sécurité')
+            delai_approvisionnement_jours = valider_nombre_non_negatif(request.form.get('delai_approvisionnement_jours'), 'Délai d’approvisionnement')
+            periodicite_reappro_jours = valider_nombre_non_negatif(request.form.get('periodicite_reappro_jours'), 'Périodicité de réapprovisionnement')
+            consommation_moyenne_journaliere = valider_nombre_non_negatif(request.form.get('consommation_moyenne_journaliere'), 'Consommation moyenne journalière')
+            cout_passation_commande = valider_nombre_non_negatif(request.form.get('cout_passation_commande'), 'Coût de passation')
+            taux_possession_annuel = valider_taux_pourcentage(request.form.get('taux_possession_annuel'), 'Taux de possession annuel')
             actif = form_values['actif']
 
             if not nom:
                 raise ValueError('Le nom du produit est obligatoire')
             if code and Produit.query.filter_by(code=code).first():
                 raise ValueError('Ce code produit existe déjà')
-            if stock_initial < 0:
-                raise ValueError('Le stock initial ne peut pas être négatif')
-            if stock_minimum < 0:
-                raise ValueError('Le stock minimum ne peut pas être négatif')
+            if stock_securite < stock_minimum:
+                stock_securite = stock_minimum
+            if methode_reappro != Produit.REAPPRO_CALENDAIRE:
+                periodicite_reappro_jours = 0
 
             produit = Produit(
                 nom=nom,
@@ -4957,10 +5476,19 @@ def ajouter_produit():
                 description=description,
                 famille=famille,
                 categorie=categorie,
+                type_stock=type_stock,
+                methode_reappro=methode_reappro,
+                methode_valorisation=methode_valorisation,
                 prix_unitaire=prix_unitaire,
                 unite=unite,
                 stock_actuel=0,
                 stock_minimum=stock_minimum,
+                stock_securite=stock_securite,
+                delai_approvisionnement_jours=delai_approvisionnement_jours,
+                periodicite_reappro_jours=periodicite_reappro_jours,
+                consommation_moyenne_journaliere=consommation_moyenne_journaliere,
+                cout_passation_commande=cout_passation_commande,
+                taux_possession_annuel=taux_possession_annuel,
                 actif=actif,
             )
             db.session.add(produit)
@@ -4987,6 +5515,9 @@ def ajouter_produit():
                 produit=None,
                 titre='Ajouter un produit',
                 form_values=form_values,
+                stock_type_options=STOCK_TYPE_OPTIONS,
+                stock_replenishment_options=STOCK_REPLENISHMENT_OPTIONS,
+                stock_valuation_options=STOCK_VALUATION_OPTIONS,
                 **catalog_context,
             )
 
@@ -4997,6 +5528,9 @@ def ajouter_produit():
         produit=None,
         titre='Ajouter un produit',
         form_values=form_values,
+        stock_type_options=STOCK_TYPE_OPTIONS,
+        stock_replenishment_options=STOCK_REPLENISHMENT_OPTIONS,
+        stock_valuation_options=STOCK_VALUATION_OPTIONS,
         **catalog_context,
     )
 
@@ -5017,27 +5551,62 @@ def modifier_produit(id):
             'description': request.form.get('description'),
             'famille': request.form.get('famille'),
             'categorie': request.form.get('categorie'),
+            'type_stock': request.form.get('type_stock'),
+            'methode_reappro': request.form.get('methode_reappro'),
+            'methode_valorisation': request.form.get('methode_valorisation'),
             'unite': request.form.get('unite'),
             'prix_unitaire': request.form.get('prix_unitaire', 0),
             'stock_minimum': request.form.get('stock_minimum', 0),
+            'stock_securite': request.form.get('stock_securite', 0),
+            'delai_approvisionnement_jours': request.form.get('delai_approvisionnement_jours', 0),
+            'periodicite_reappro_jours': request.form.get('periodicite_reappro_jours', 0),
+            'consommation_moyenne_journaliere': request.form.get('consommation_moyenne_journaliere', 0),
+            'cout_passation_commande': request.form.get('cout_passation_commande', 0),
+            'taux_possession_annuel': request.form.get('taux_possession_annuel', 25),
             'actif': 'actif' in request.form,
         })
         try:
             nom = form_values['nom']
             code = form_values['code'] or None
             prix_unitaire = valider_montant(request.form.get('prix_unitaire', 0))
-            stock_minimum = float(request.form.get('stock_minimum') or 0)
+            stock_minimum = valider_nombre_non_negatif(request.form.get('stock_minimum'), 'Stock minimum')
+            stock_securite = valider_nombre_non_negatif(request.form.get('stock_securite'), 'Stock de sécurité')
+            delai_approvisionnement_jours = valider_nombre_non_negatif(request.form.get('delai_approvisionnement_jours'), 'Délai d’approvisionnement')
+            periodicite_reappro_jours = valider_nombre_non_negatif(request.form.get('periodicite_reappro_jours'), 'Périodicité de réapprovisionnement')
+            consommation_moyenne_journaliere = valider_nombre_non_negatif(request.form.get('consommation_moyenne_journaliere'), 'Consommation moyenne journalière')
+            cout_passation_commande = valider_nombre_non_negatif(request.form.get('cout_passation_commande'), 'Coût de passation')
+            taux_possession_annuel = valider_taux_pourcentage(request.form.get('taux_possession_annuel'), 'Taux de possession annuel')
+            type_stock = valider_choix_liste(
+                form_values['type_stock'],
+                list(STOCK_TYPE_OPTIONS.keys()),
+                'Type de stock',
+                obligatoire=True,
+            )
+            methode_reappro = valider_choix_liste(
+                form_values['methode_reappro'],
+                list(STOCK_REPLENISHMENT_OPTIONS.keys()),
+                'Méthode de réapprovisionnement',
+                obligatoire=True,
+            )
+            methode_valorisation = valider_choix_liste(
+                form_values['methode_valorisation'],
+                list(STOCK_VALUATION_OPTIONS.keys()),
+                'Méthode de valorisation',
+                obligatoire=True,
+            )
 
             if not nom:
                 raise ValueError('Le nom du produit est obligatoire')
-            if stock_minimum < 0:
-                raise ValueError('Le stock minimum ne peut pas être négatif')
 
             duplicate = None
             if code:
                 duplicate = Produit.query.filter(Produit.code == code, Produit.id != produit.id).first()
             if duplicate:
                 raise ValueError('Ce code produit existe déjà')
+            if stock_securite < stock_minimum:
+                stock_securite = stock_minimum
+            if methode_reappro != Produit.REAPPRO_CALENDAIRE:
+                periodicite_reappro_jours = 0
 
             produit.nom = nom
             produit.code = code
@@ -5046,9 +5615,18 @@ def modifier_produit(id):
                 form_values['famille'],
                 form_values['categorie'],
             )
+            produit.type_stock = type_stock
+            produit.methode_reappro = methode_reappro
+            produit.methode_valorisation = methode_valorisation
             produit.prix_unitaire = prix_unitaire
             produit.unite = form_values['unite'] or None
             produit.stock_minimum = stock_minimum
+            produit.stock_securite = stock_securite
+            produit.delai_approvisionnement_jours = delai_approvisionnement_jours
+            produit.periodicite_reappro_jours = periodicite_reappro_jours
+            produit.consommation_moyenne_journaliere = consommation_moyenne_journaliere
+            produit.cout_passation_commande = cout_passation_commande
+            produit.taux_possession_annuel = taux_possession_annuel
             produit.actif = form_values['actif']
 
             enregistrer_log('UPDATE', 'produit', produit.id, f'Modification produit {produit.nom}')
@@ -5064,6 +5642,9 @@ def modifier_produit(id):
                 produit=produit,
                 titre='Modifier le produit',
                 form_values=form_values,
+                stock_type_options=STOCK_TYPE_OPTIONS,
+                stock_replenishment_options=STOCK_REPLENISHMENT_OPTIONS,
+                stock_valuation_options=STOCK_VALUATION_OPTIONS,
                 **catalog_context,
             )
 
@@ -5074,6 +5655,9 @@ def modifier_produit(id):
         produit=produit,
         titre='Modifier le produit',
         form_values=form_values,
+        stock_type_options=STOCK_TYPE_OPTIONS,
+        stock_replenishment_options=STOCK_REPLENISHMENT_OPTIONS,
+        stock_valuation_options=STOCK_VALUATION_OPTIONS,
         **catalog_context,
     )
 
@@ -5498,12 +6082,13 @@ def exporter_excel():
             'Montant': c.montant,
             'Avance': c.avance,
             'Solde': c.solde,
-            'Prix Référence Marché': c.prix_reference_marche,
             'Commande Conforme': c.commande_conforme,
             'Rupture Fournisseur': c.rupture_fournisseur,
             'Note Performance Fournisseur': c.note_fournisseur,
             'Note SAV Fournisseur': c.note_service,
-            'Statut': c.statut,
+            'Statut paiement': c.statut,
+            'Avancement': c.get_statut_avancement(),
+            'Niveau processus': c.get_niveau_processus(),
             'Date Paiement': c.date_paiement,
             'Commentaire': c.commentaire
         })
@@ -5716,10 +6301,19 @@ def migrate_existing_schema():
             'description': 'TEXT',
             'famille': 'VARCHAR(150)',
             'categorie': 'VARCHAR(100)',
+            'type_stock': 'VARCHAR(30)',
+            'methode_reappro': 'VARCHAR(30)',
+            'methode_valorisation': 'VARCHAR(20)',
             'prix_unitaire': 'FLOAT',
             'unite': 'VARCHAR(20)',
             'stock_actuel': 'FLOAT',
             'stock_minimum': 'FLOAT',
+            'stock_securite': 'FLOAT',
+            'delai_approvisionnement_jours': 'FLOAT',
+            'periodicite_reappro_jours': 'FLOAT',
+            'consommation_moyenne_journaliere': 'FLOAT',
+            'cout_passation_commande': 'FLOAT',
+            'taux_possession_annuel': 'FLOAT',
             'actif': 'BOOLEAN',
             'created_at': 'TIMESTAMP',
             'updated_at': 'TIMESTAMP',
@@ -5752,6 +6346,8 @@ def migrate_existing_schema():
         "CREATE INDEX IF NOT EXISTS idx_produits_nom ON produits (nom)",
         "CREATE INDEX IF NOT EXISTS idx_produits_famille ON produits (famille)",
         "CREATE INDEX IF NOT EXISTS idx_produits_categorie ON produits (categorie)",
+        "CREATE INDEX IF NOT EXISTS idx_produits_type_stock ON produits (type_stock)",
+        "CREATE INDEX IF NOT EXISTS idx_produits_methode_reappro ON produits (methode_reappro)",
         "CREATE INDEX IF NOT EXISTS idx_produits_actif ON produits (actif)",
         "CREATE INDEX IF NOT EXISTS idx_produits_stock_actuel ON produits (stock_actuel)",
         "CREATE INDEX IF NOT EXISTS idx_ventes_client_nom ON ventes (client_nom)",
@@ -5800,8 +6396,21 @@ def migrate_existing_schema():
                 UPDATE produits
                 SET prix_unitaire = COALESCE(prix_unitaire, 0),
                     stock_actuel = COALESCE(stock_actuel, 0),
-                    stock_minimum = COALESCE(stock_minimum, 0)
-            """))
+                    stock_minimum = COALESCE(stock_minimum, 0),
+                    stock_securite = COALESCE(stock_securite, 0),
+                    delai_approvisionnement_jours = COALESCE(delai_approvisionnement_jours, 0),
+                    periodicite_reappro_jours = COALESCE(periodicite_reappro_jours, 0),
+                    consommation_moyenne_journaliere = COALESCE(consommation_moyenne_journaliere, 0),
+                    cout_passation_commande = COALESCE(cout_passation_commande, 0),
+                    taux_possession_annuel = COALESCE(taux_possession_annuel, 25),
+                    type_stock = COALESCE(type_stock, :type_stock_default),
+                    methode_reappro = COALESCE(methode_reappro, :reappro_default),
+                    methode_valorisation = COALESCE(methode_valorisation, :valorisation_default)
+            """), {
+                'type_stock_default': Produit.TYPE_PRODUIT_FINI,
+                'reappro_default': Produit.REAPPRO_POINT_COMMANDE,
+                'valorisation_default': Produit.VALORISATION_CUMP,
+            })
         if dialect_name == 'sqlite':
             # Normalisation des données héritées pour éviter les crashs ORM.
             connection.execute(text("""
@@ -5820,7 +6429,8 @@ def migrate_existing_schema():
                 text("""
                     UPDATE commandes
                     SET statut = CASE
-                        WHEN COALESCE(solde, 0) <= 0 THEN :statut_paye
+                        WHEN COALESCE(solde, 0) <= 0
+                             AND date_paiement IS NOT NULL THEN :statut_paye
                         ELSE :statut_a_payer
                     END
                 """),

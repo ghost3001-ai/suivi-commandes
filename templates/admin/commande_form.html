@@ -3,6 +3,11 @@
 {% block title %}{{ titre }}{% endblock %}
 
 {% block content %}
+{% set can_manage_core = commande_capabilities.can_manage_core %}
+{% set can_manage_payment = commande_capabilities.can_manage_payment %}
+{% set can_manage_reception = commande_capabilities.can_manage_reception %}
+{% set can_manage_advance = can_manage_core or can_manage_payment %}
+
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
     <h1 class="h2">
         <i class="bi bi-{% if commande %}pencil-square{% else %}plus-circle{% endif %}"></i> {{ titre }}
@@ -12,133 +17,192 @@
     </a>
 </div>
 
-<div class="card shadow-sm">
-    <div class="card-body">
-        <form method="POST">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="alert alert-light border shadow-sm">
+    <div class="row g-3">
+        <div class="col-md-4">
+            <strong>Achats</strong><br>
+            <small class="text-muted">Saisie initiale de la commande fournisseur.</small>
+        </div>
+        <div class="col-md-4">
+            <strong>Comptabilité</strong><br>
+            <small class="text-muted">Renseigne l'avance finale, la date de paiement et le numéro de facture.</small>
+        </div>
+        <div class="col-md-4">
+            <strong>Stock</strong><br>
+            <small class="text-muted">Renseigne la réception réelle et le bon de livraison pour achever la commande.</small>
+        </div>
+    </div>
+</div>
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-receipt"></i> Informations de commande</h5>
+        </div>
+        <div class="card-body">
+            {% if not can_manage_core %}
+            <div class="alert alert-warning py-2">
+                Cette section est en lecture seule pour votre profil.
+            </div>
+            {% endif %}
             <div class="row">
                 <div class="col-md-2 mb-3">
                     <label class="form-label">Nr.</label>
-                    <input type="number" name="nr" class="form-control" value="{{ commande.nr if commande else '' }}">
+                    <input type="number" name="nr" class="form-control" value="{{ form_values.nr }}" {% if not can_manage_core %}disabled{% endif %}>
                 </div>
                 <div class="col-md-3 mb-3">
                     <label class="form-label">Date commande *</label>
-                    <input type="date" name="date_cde" class="form-control" 
-                           value="{{ commande.date_cde.strftime('%Y-%m-%d') if commande and commande.date_cde else '' }}">
+                    <input type="date" name="date_cde" class="form-control" value="{{ form_values.date_cde }}" {% if not can_manage_core %}disabled{% endif %}>
                 </div>
                 <div class="col-md-3 mb-3">
                     <label class="form-label">Entité *</label>
-                    <select name="entite" class="form-select" required>
+                    <select name="entite" class="form-select" {% if not can_manage_core %}disabled{% endif %}>
                         <option value="">Sélectionner</option>
-                        <option value="AFRILUX" {% if commande and commande.entite == 'AFRILUX' %}selected{% endif %}>AFRILUX</option>
-                        <option value="SMART" {% if commande and commande.entite == 'SMART' %}selected{% endif %}>SMART</option>
+                        {% for option in entite_options %}
+                        <option value="{{ option }}" {% if form_values.entite == option %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <div class="col-md-4 mb-3">
-                    <label class="form-label">Acheteur</label>
-                    <select name="acheteur" class="form-select">
+                    <label class="form-label">Acheteur *</label>
+                    <select name="acheteur" class="form-select" {% if not can_manage_core %}disabled{% endif %}>
                         <option value="">Sélectionner</option>
-                        <option value="GILLES" {% if commande and commande.acheteur == 'GILLES' %}selected{% endif %}>GILLES</option>
-                        <option value="JISLAIN" {% if commande and commande.acheteur == 'JISLAIN' %}selected{% endif %}>JISLAIN</option>
-                        <option value="ALAIN" {% if commande and commande.acheteur == 'ALAIN' %}selected{% endif %}>ALAIN</option>
+                        {% for option in acheteur_options %}
+                        <option value="{{ option }}" {% if form_values.acheteur == option %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
                     </select>
                 </div>
             </div>
-            
+
             <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Demandeur</label>
-                    <input type="text" name="demandeur" class="form-control" value="{{ commande.demandeur if commande else '' }}">
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Service demandeur</label>
-                    {% set selected_service = request.form.get('service_demandeur') if request.method == 'POST' else (commande.service_demandeur if commande else '') %}
-                    <select name="service_demandeur" class="form-select">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Service demandeur *</label>
+                    <select name="service_demandeur" class="form-select" {% if not can_manage_core %}disabled{% endif %}>
                         <option value="">Sélectionner</option>
                         {% for service in services_demandeur %}
-                        <option value="{{ service }}" {% if selected_service == service %}selected{% endif %}>{{ service }}</option>
+                        <option value="{{ service }}" {% if form_values.service_demandeur == service %}selected{% endif %}>{{ service }}</option>
                         {% endfor %}
                     </select>
                 </div>
-            </div>
-            
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Fournisseur</label>
-                    <select name="fournisseur_id" class="form-select">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Demandeur *</label>
+                    <input type="text" name="demandeur" class="form-control" value="{{ form_values.demandeur }}" {% if not can_manage_core %}disabled{% endif %}>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Fournisseur *</label>
+                    <select name="fournisseur_id" class="form-select" {% if not can_manage_core %}disabled{% endif %}>
                         <option value="">Sélectionner</option>
                         {% for f in fournisseurs %}
-                        <option value="{{ f.id }}" {% if commande and commande.fournisseur_id == f.id %}selected{% endif %}>{{ f.nom }}</option>
+                        <option value="{{ f.id }}" {% if form_values.fournisseur_id == (f.id|string) %}selected{% endif %}>{{ f.nom }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">N° Bon commande</label>
-                    <input type="text" name="bon_commande" class="form-control" value="{{ commande.bon_commande if commande else '' }}">
-                </div>
             </div>
-            
-            <div class="mb-3">
-                <label class="form-label">Affaire / Description</label>
-                <textarea name="affaire" class="form-control" rows="2">{{ commande.affaire if commande else '' }}</textarea>
-            </div>
-            
+
             <div class="row">
                 <div class="col-md-4 mb-3">
-                    <label class="form-label">Montant (FCFA)</label>
-                    <input type="number" step="0.01" name="montant" class="form-control" value="{{ commande.montant if commande else 0 }}">
+                    <label class="form-label">N° Bon commande *</label>
+                    <input type="text" name="bon_commande" class="form-control" value="{{ form_values.bon_commande }}" {% if not can_manage_core %}disabled{% endif %}>
                 </div>
                 <div class="col-md-4 mb-3">
-                    <label class="form-label">Avance (FCFA)</label>
-                    <input type="number" step="0.01" name="avance" class="form-control" value="{{ commande.avance if commande else 0 }}">
+                    <label class="form-label">Date livraison *</label>
+                    <input type="date" name="date_livraison" class="form-control" value="{{ form_values.date_livraison }}" {% if not can_manage_core %}disabled{% endif %}>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Montant (FCFA) *</label>
+                    <input type="number" step="0.01" min="0" name="montant" class="form-control" value="{{ form_values.montant }}" {% if not can_manage_core %}disabled{% endif %}>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Affaire / Description *</label>
+                <textarea name="affaire" class="form-control" rows="3" {% if not can_manage_core %}disabled{% endif %}>{{ form_values.affaire }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-cash-stack"></i> Paiement fournisseur</h5>
+        </div>
+        <div class="card-body">
+            {% if not can_manage_payment and not can_manage_core %}
+            <div class="alert alert-warning py-2">
+                Cette section est en lecture seule pour votre profil.
+            </div>
+            {% endif %}
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Avance (FCFA) *</label>
+                    <input type="number" step="0.01" min="0" name="avance" class="form-control" value="{{ form_values.avance }}" {% if not can_manage_advance %}disabled{% endif %}>
+                    <small class="text-muted">Passe à PAYÉ quand l'avance couvre le montant et que la date de paiement est renseignée.</small>
                 </div>
                 <div class="col-md-4 mb-3">
                     <label class="form-label">Date paiement</label>
-                    <input type="date" name="date_paiement" class="form-control" 
-                           value="{{ commande.date_paiement.strftime('%Y-%m-%d') if commande and commande.date_paiement else '' }}">
+                    <input type="date" name="date_paiement" class="form-control" value="{{ form_values.date_paiement }}" {% if not can_manage_payment %}disabled{% endif %}>
                 </div>
-            </div>
-            
-            <div class="row">
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Date livraison</label>
-                    <input type="date" name="date_livraison" class="form-control" 
-                           value="{{ commande.date_livraison.strftime('%Y-%m-%d') if commande and commande.date_livraison else '' }}">
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Date réception réelle</label>
-                    <input type="date" name="date_reception" class="form-control" 
-                           value="{{ commande.date_reception.strftime('%Y-%m-%d') if commande and commande.date_reception else '' }}">
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">N° Bon livraison</label>
-                    <input type="text" name="bon_livraison" class="form-control" value="{{ commande.bon_livraison if commande else '' }}">
-                </div>
-            </div>
-
-            <div class="row">
                 <div class="col-md-4 mb-3">
                     <label class="form-label">N° Facture</label>
-                    <input type="text" name="facture" class="form-control" value="{{ commande.facture if commande else '' }}">
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Prix de référence marché (FCFA)</label>
-                    <input type="number" step="0.01" name="prix_reference_marche" class="form-control" value="{{ commande.prix_reference_marche if commande else 0 }}">
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Note performance fournisseur /5</label>
-                    <input type="number" step="0.1" min="0" max="5" name="note_fournisseur" class="form-control" value="{{ commande.note_fournisseur if commande and commande.note_fournisseur is not none else '' }}">
+                    <input type="text" name="facture" class="form-control" value="{{ form_values.facture }}" {% if not can_manage_payment %}disabled{% endif %}>
                 </div>
             </div>
+        </div>
+    </div>
 
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-box-seam"></i> Réception magasin</h5>
+        </div>
+        <div class="card-body">
+            {% if not can_manage_reception %}
+            <div class="alert alert-warning py-2">
+                Cette section est en lecture seule pour votre profil.
+            </div>
+            {% endif %}
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Date réception réelle</label>
+                    <input type="date" name="date_reception" class="form-control" value="{{ form_values.date_reception }}" {% if not can_manage_reception %}disabled{% endif %}>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">N° Bon livraison</label>
+                    <input type="text" name="bon_livraison" class="form-control" value="{{ form_values.bon_livraison }}" {% if not can_manage_reception %}disabled{% endif %}>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if can_manage_core or form_values.commentaire or form_values.note_fournisseur or form_values.note_service %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-chat-left-text"></i> Suivi optionnel</h5>
+        </div>
+        <div class="card-body">
+            {% if not can_manage_core %}
+            <div class="alert alert-warning py-2">
+                Les informations complémentaires restent visibles, mais non modifiables pour votre profil.
+            </div>
+            {% endif %}
             <div class="row">
                 <div class="col-md-4 mb-3">
-                    <label class="form-label">Note service après-vente /5</label>
-                    <input type="number" step="0.1" min="0" max="5" name="note_service" class="form-control" value="{{ commande.note_service if commande and commande.note_service is not none else '' }}">
+                    <label class="form-label">Note performance fournisseur /5</label>
+                    <input type="number" step="0.1" min="0" max="5" name="note_fournisseur" class="form-control" value="{{ form_values.note_fournisseur }}" {% if not can_manage_core %}disabled{% endif %}>
                 </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Note service /5</label>
+                    <input type="number" step="0.1" min="0" max="5" name="note_service" class="form-control" value="{{ form_values.note_service }}" {% if not can_manage_core %}disabled{% endif %}>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Commentaire</label>
+                    <textarea name="commentaire" class="form-control" rows="1" {% if not can_manage_core %}disabled{% endif %}>{{ form_values.commentaire }}</textarea>
+                </div>
+            </div>
+            <div class="row">
                 <div class="col-md-4 mb-3 d-flex align-items-end">
                     <div class="form-check">
-                        <input class="form-check-input" type="checkbox" name="commande_conforme" id="commande_conforme" {% if not commande or commande.commande_conforme %}checked{% endif %}>
+                        <input class="form-check-input" type="checkbox" name="commande_conforme" id="commande_conforme" {% if form_values.commande_conforme %}checked{% endif %} {% if not can_manage_core %}disabled{% endif %}>
                         <label class="form-check-label" for="commande_conforme">
                             Commande conforme
                         </label>
@@ -146,28 +210,24 @@
                 </div>
                 <div class="col-md-4 mb-3 d-flex align-items-end">
                     <div class="form-check">
-                        <input class="form-check-input" type="checkbox" name="rupture_fournisseur" id="rupture_fournisseur" {% if commande and commande.rupture_fournisseur %}checked{% endif %}>
+                        <input class="form-check-input" type="checkbox" name="rupture_fournisseur" id="rupture_fournisseur" {% if form_values.rupture_fournisseur %}checked{% endif %} {% if not can_manage_core %}disabled{% endif %}>
                         <label class="form-check-label" for="rupture_fournisseur">
                             Rupture / livraison incomplète
                         </label>
                     </div>
                 </div>
             </div>
-            
-            <div class="mb-3">
-                <label class="form-label">Commentaire</label>
-                <textarea name="commentaire" class="form-control" rows="2">{{ commande.commentaire if commande else '' }}</textarea>
-            </div>
-            
-            <div class="mt-3">
-                <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-save"></i> Enregistrer
-                </button>
-                <a href="{{ url_for('commandes') }}" class="btn btn-secondary">
-                    <i class="bi bi-x-circle"></i> Annuler
-                </a>
-            </div>
-        </form>
+        </div>
     </div>
-</div>
+    {% endif %}
+
+    <div class="mt-3">
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-save"></i> Enregistrer
+        </button>
+        <a href="{{ url_for('commandes') }}" class="btn btn-secondary">
+            <i class="bi bi-x-circle"></i> Annuler
+        </a>
+    </div>
+</form>
 {% endblock %}

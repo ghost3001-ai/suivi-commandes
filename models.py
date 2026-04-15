@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from datetime import datetime, date
+import math
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
@@ -55,6 +56,8 @@ class Commande(db.Model):
     __tablename__ = 'commandes'
     STATUT_PAYE = 'PAYÉ'
     STATUT_A_PAYER = 'A PAYER'
+    PHASE_EN_COURS = 'EN COURS'
+    PHASE_ACHEVEE = 'ACHEVÉE'
     
     id = db.Column(db.Integer, primary_key=True)
     nr = db.Column(db.Integer)
@@ -83,14 +86,30 @@ class Commande(db.Model):
     commentaire = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
-    
+
     def calculer_solde(self):
-        """Calcule le solde et met à jour le statut"""
-        self.solde = self.montant - self.avance
-        self.statut = self.STATUT_PAYE if self.solde <= 0 else self.STATUT_A_PAYER
+        """Calcule le solde et met à jour le statut de paiement."""
+        montant = float(self.montant or 0)
+        avance = float(self.avance or 0)
+        self.solde = max(montant - avance, 0)
+        paiement_complet = avance >= montant and self.date_paiement is not None
+        self.statut = self.STATUT_PAYE if paiement_complet else self.STATUT_A_PAYER
 
     def est_payee(self):
         return self.statut == self.STATUT_PAYE
+
+    def est_achevee(self):
+        return self.est_payee() and self.date_reception is not None and bool((self.bon_livraison or '').strip())
+
+    def get_statut_avancement(self):
+        return self.PHASE_ACHEVEE if self.est_achevee() else self.PHASE_EN_COURS
+
+    def get_niveau_processus(self):
+        if self.est_achevee():
+            return 'Commande achevée'
+        if self.est_payee():
+            return 'Payée, en attente de réception'
+        return 'En attente de paiement'
 
     def get_ecart_livraison(self):
         """Retourne l'écart entre date prévue et date réelle."""
@@ -138,6 +157,8 @@ class Commande(db.Model):
             'note_fournisseur': self.note_fournisseur,
             'note_service': self.note_service,
             'statut': self.statut,
+            'statut_avancement': self.get_statut_avancement(),
+            'niveau_processus': self.get_niveau_processus(),
             'date_paiement': self.date_paiement.isoformat() if self.date_paiement else None,
             'commentaire': self.commentaire,
             'delai': self.get_delai(),
@@ -169,6 +190,19 @@ class LogAction(db.Model):
 class Produit(db.Model):
     """Modèle pour les produits/équipements"""
     __tablename__ = 'produits'
+
+    TYPE_MATIERE_PREMIERE = 'MATIERE_PREMIERE'
+    TYPE_EN_COURS = 'EN_COURS'
+    TYPE_PRODUIT_FINI = 'PRODUIT_FINI'
+    TYPE_MRO = 'MRO'
+
+    REAPPRO_CALENDAIRE = 'CALENDAIRE'
+    REAPPRO_POINT_COMMANDE = 'POINT_COMMANDE'
+    REAPPRO_KANBAN = 'KANBAN'
+
+    VALORISATION_FIFO = 'FIFO'
+    VALORISATION_LIFO = 'LIFO'
+    VALORISATION_CUMP = 'CUMP'
     
     id = db.Column(db.Integer, primary_key=True)
     nom = db.Column(db.String(200), nullable=False, index=True)
@@ -176,10 +210,19 @@ class Produit(db.Model):
     description = db.Column(db.Text)
     famille = db.Column(db.String(150), index=True)
     categorie = db.Column(db.String(100), index=True)
+    type_stock = db.Column(db.String(30), default=TYPE_PRODUIT_FINI, index=True)
+    methode_reappro = db.Column(db.String(30), default=REAPPRO_POINT_COMMANDE, index=True)
+    methode_valorisation = db.Column(db.String(20), default=VALORISATION_CUMP)
     prix_unitaire = db.Column(db.Float, default=0)
     unite = db.Column(db.String(20))  # pièce, kg, mètre, etc.
     stock_actuel = db.Column(db.Float, default=0, index=True)
     stock_minimum = db.Column(db.Float, default=0)
+    stock_securite = db.Column(db.Float, default=0)
+    delai_approvisionnement_jours = db.Column(db.Float, default=0)
+    periodicite_reappro_jours = db.Column(db.Float, default=0)
+    consommation_moyenne_journaliere = db.Column(db.Float, default=0)
+    cout_passation_commande = db.Column(db.Float, default=0)
+    taux_possession_annuel = db.Column(db.Float, default=25)
     actif = db.Column(db.Boolean, default=True, index=True)
     
     # Relations
@@ -194,8 +237,109 @@ class Produit(db.Model):
     def valeur_stock(self):
         return (self.stock_actuel or 0) * (self.prix_unitaire or 0)
 
+    @property
+    def demande_annuelle_estimee(self):
+        return max(float(self.consommation_moyenne_journaliere or 0), 0) * 365
+
+    @property
+    def point_commande(self):
+        return (
+            max(float(self.consommation_moyenne_journaliere or 0), 0)
+            * max(float(self.delai_approvisionnement_jours or 0), 0)
+        ) + max(float(self.stock_securite or 0), 0)
+
+    @property
+    def couverture_stock_jours(self):
+        consommation = float(self.consommation_moyenne_journaliere or 0)
+        if consommation <= 0:
+            return None
+        return (self.stock_actuel or 0) / consommation
+
+    @property
+    def quantite_economique_commande(self):
+        demande_annuelle = self.demande_annuelle_estimee
+        cout_passation = float(self.cout_passation_commande or 0)
+        cout_unitaire = float(self.prix_unitaire or 0)
+        taux_possession = float(self.taux_possession_annuel or 0) / 100
+
+        if demande_annuelle <= 0 or cout_passation <= 0 or cout_unitaire <= 0 or taux_possession <= 0:
+            return None
+
+        return math.sqrt((2 * demande_annuelle * cout_passation) / (cout_unitaire * taux_possession))
+
     def est_stock_faible(self):
         return self.actif and (self.stock_actuel or 0) <= (self.stock_minimum or 0)
+
+    def est_en_rupture(self):
+        return self.actif and (self.stock_actuel or 0) <= 0
+
+    def doit_etre_reapprovisionne(self):
+        if not self.actif:
+            return False
+        if self.methode_reappro == self.REAPPRO_KANBAN:
+            return (self.stock_actuel or 0) <= max(float(self.stock_securite or 0), float(self.stock_minimum or 0))
+        if self.methode_reappro == self.REAPPRO_CALENDAIRE and (self.periodicite_reappro_jours or 0) > 0:
+            couverture = self.couverture_stock_jours
+            if couverture is None:
+                return (self.stock_actuel or 0) <= max(float(self.stock_minimum or 0), float(self.stock_securite or 0))
+            return couverture <= float(self.periodicite_reappro_jours or 0)
+        seuil = self.point_commande
+        if seuil > 0:
+            return (self.stock_actuel or 0) <= seuil
+        return self.est_stock_faible()
+
+    def get_quantite_reappro_recommandee(self):
+        if not self.doit_etre_reapprovisionne():
+            return None
+
+        qec = self.quantite_economique_commande
+        if qec is not None:
+            return qec
+
+        cible = max(float(self.stock_minimum or 0), float(self.stock_securite or 0))
+        if self.methode_reappro == self.REAPPRO_CALENDAIRE and (self.periodicite_reappro_jours or 0) > 0:
+            cible += max(float(self.consommation_moyenne_journaliere or 0), 0) * float(self.periodicite_reappro_jours or 0)
+        elif self.point_commande > 0:
+            cible = max(cible, self.point_commande)
+
+        recommandee = cible - float(self.stock_actuel or 0)
+        return recommandee if recommandee > 0 else None
+
+    def get_type_stock_label(self):
+        labels = {
+            self.TYPE_MATIERE_PREMIERE: 'Matière première',
+            self.TYPE_EN_COURS: 'En-cours',
+            self.TYPE_PRODUIT_FINI: 'Produit fini',
+            self.TYPE_MRO: 'Maintenance / MRO',
+        }
+        return labels.get(self.type_stock, 'Produit fini')
+
+    def get_methode_reappro_label(self):
+        labels = {
+            self.REAPPRO_CALENDAIRE: 'Calendaire',
+            self.REAPPRO_POINT_COMMANDE: 'Point de commande',
+            self.REAPPRO_KANBAN: 'Kanban',
+        }
+        return labels.get(self.methode_reappro, 'Point de commande')
+
+    def get_methode_valorisation_label(self):
+        labels = {
+            self.VALORISATION_FIFO: 'FIFO',
+            self.VALORISATION_LIFO: 'LIFO',
+            self.VALORISATION_CUMP: 'CUMP',
+        }
+        return labels.get(self.methode_valorisation, 'CUMP')
+
+    def get_etat_stock(self):
+        if not self.actif:
+            return 'INACTIF'
+        if self.est_en_rupture():
+            return 'RUPTURE'
+        if self.doit_etre_reapprovisionne():
+            return 'A_REAPPROVISIONNER'
+        if self.est_stock_faible():
+            return 'STOCK_FAIBLE'
+        return 'DISPONIBLE'
     
     def __repr__(self):
         return f'<Produit {self.nom}>'
