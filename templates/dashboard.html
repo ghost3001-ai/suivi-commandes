@@ -16,8 +16,13 @@
     display: flex;
     gap: 0.75rem;
     overflow-x: auto;
-    padding-bottom: 0.35rem;
+    position: sticky;
+    top: 5.4rem;
+    z-index: 1015;
+    padding: 0.35rem 0 0.75rem;
     margin-bottom: 1.5rem;
+    background: rgba(248, 249, 252, 0.92);
+    backdrop-filter: blur(12px);
     scrollbar-width: thin;
 }
 
@@ -37,6 +42,126 @@
 
 .dashboard-chart-shell {
     min-height: 280px;
+}
+
+.executive-hero-card {
+    border: 1px solid #dbe6f3;
+    border-radius: 18px;
+    overflow: hidden;
+    background: linear-gradient(135deg, #102348 0%, #183b70 56%, #f7fbff 56%, #ffffff 100%);
+}
+
+.executive-hero-card .card-body {
+    padding: 1.5rem;
+}
+
+.executive-hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr);
+    gap: 1rem;
+    align-items: start;
+}
+
+.executive-summary-copy {
+    color: #fff;
+}
+
+.executive-summary-copy p {
+    color: rgba(255, 255, 255, 0.86);
+    max-width: 52rem;
+}
+
+.executive-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+}
+
+.executive-status-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.42rem 0.78rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.executive-status-badge.level-danger {
+    background: rgba(220, 53, 69, 0.2);
+}
+
+.executive-status-badge.level-warning {
+    background: rgba(253, 126, 20, 0.24);
+}
+
+.executive-status-badge.level-info,
+.executive-status-badge.level-success,
+.executive-status-badge.neutral {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.executive-panel {
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #e5eef8;
+    border-radius: 16px;
+    padding: 1rem;
+}
+
+.executive-priority-list .list-group-item {
+    padding-left: 0;
+    padding-right: 0;
+    background: transparent;
+}
+
+.executive-fact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.executive-fact {
+    border: 1px solid #e6edf7;
+    border-radius: 12px;
+    padding: 0.85rem;
+    background: #f8fafc;
+}
+
+.executive-fact .value {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #102348;
+}
+
+.dashboard-decision-card {
+    border: 1px solid #dfe8f4;
+    border-radius: 16px;
+    padding: 1rem;
+    height: 100%;
+    background: #fff;
+    box-shadow: 0 10px 25px rgba(16, 35, 72, 0.05);
+}
+
+.dashboard-decision-card.level-danger {
+    border-color: rgba(220, 53, 69, 0.3);
+}
+
+.dashboard-decision-card.level-warning {
+    border-color: rgba(253, 126, 20, 0.32);
+}
+
+.dashboard-decision-card.level-success {
+    border-color: rgba(25, 135, 84, 0.28);
+}
+
+.dashboard-decision-card .value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #102348;
 }
 
 .dashboard-alert-feed .list-group-item {
@@ -74,9 +199,87 @@
     margin-bottom: 0.5rem;
 }
 
+.procurement-card {
+    border: 1px solid #e3eaf6;
+    border-radius: 14px;
+    height: 100%;
+}
+
+.procurement-card.level-danger {
+    border-color: rgba(220, 53, 69, 0.35);
+    background: linear-gradient(180deg, rgba(220, 53, 69, 0.06), rgba(255, 255, 255, 0.96));
+}
+
+.procurement-card.level-warning {
+    border-color: rgba(253, 126, 20, 0.35);
+    background: linear-gradient(180deg, rgba(253, 126, 20, 0.08), rgba(255, 255, 255, 0.96));
+}
+
+.procurement-card.level-success {
+    border-color: rgba(25, 135, 84, 0.28);
+    background: linear-gradient(180deg, rgba(25, 135, 84, 0.06), rgba(255, 255, 255, 0.96));
+}
+
+.procurement-card.level-info,
+.procurement-card.level-secondary {
+    background: linear-gradient(180deg, rgba(44, 62, 109, 0.04), rgba(255, 255, 255, 0.96));
+}
+
+.procurement-card .metric {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.executive-tile {
+    border: 1px solid #dfe7f2;
+    border-radius: 14px;
+    padding: 1rem;
+    height: 100%;
+    background: #fff;
+}
+
+.executive-tile.level-danger {
+    border-color: rgba(220, 53, 69, 0.35);
+}
+
+.executive-tile.level-warning {
+    border-color: rgba(253, 126, 20, 0.35);
+}
+
+.executive-tile.level-success {
+    border-color: rgba(25, 135, 84, 0.30);
+}
+
+.executive-tile .value,
+.mini-highlight .value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.mini-highlight {
+    border-radius: 12px;
+    background: #f8fafc;
+    border: 1px solid #e7edf5;
+    padding: 0.9rem;
+    height: 100%;
+}
+
+.procurement-workflow td {
+    vertical-align: top;
+}
+
 @media (max-width: 991.98px) {
     .dashboard-chart-shell {
         min-height: 240px;
+    }
+
+    .dashboard-section-nav {
+        top: 5rem;
+    }
+
+    .executive-hero-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -84,6 +287,10 @@
     .dashboard-toolbar {
         width: 100%;
         justify-content: flex-start;
+    }
+
+    .executive-fact-grid {
+        grid-template-columns: 1fr;
     }
 }
 </style>
@@ -138,7 +345,9 @@
      data-poll-seconds="{{ dashboard_poll_seconds }}">
     <div class="dashboard-section-nav nav nav-pills">
         <a class="nav-link active" href="#section-filtres" data-dashboard-section-link>Filtres</a>
+        <a class="nav-link" href="#section-decideur" data-dashboard-section-link>Décideur</a>
         <a class="nav-link" href="#section-kpi" data-dashboard-section-link>Synthèse</a>
+        <a class="nav-link" href="#section-analyst" data-dashboard-section-link>Data Analyst</a>
         <a class="nav-link" href="#section-ventes" data-dashboard-section-link>Ventes</a>
         <a class="nav-link" href="#section-fournisseurs" data-dashboard-section-link>Fournisseurs</a>
         <a class="nav-link" href="#section-operations" data-dashboard-section-link>Opérations</a>
@@ -249,6 +458,74 @@
     </div>
 </div>
 {% endif %}
+
+<div class="card executive-hero-card mb-4" id="section-decideur" data-dashboard-section>
+    <div class="card-body">
+        <div class="executive-hero-grid">
+            <div class="executive-summary-copy">
+                <div class="small text-uppercase opacity-75">Vue décideur</div>
+                <div class="executive-status-row mt-2">
+                    <span class="executive-status-badge level-{{ executive_overview.level }}">{{ executive_overview.status_label }}</span>
+                    <span class="executive-status-badge neutral">Score {{ executive_overview.health_score }}/100</span>
+                    <span class="executive-status-badge neutral">{{ executive_overview.period_label }}</span>
+                </div>
+                <h3 class="mt-4 mb-2">{{ executive_overview.headline }}</h3>
+                <p class="mb-0">{{ executive_overview.message }}</p>
+                <div class="small opacity-75 mt-4">Mise à jour {{ executive_overview.generated_at_label }}</div>
+            </div>
+            <div class="executive-panel">
+                <div class="small text-uppercase text-muted mb-2">Priorités du moment</div>
+                <div class="list-group list-group-flush executive-priority-list mb-3">
+                    {% for priority in executive_overview.priorities %}
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div>
+                                <div class="fw-semibold">{{ priority.title }}</div>
+                                <div class="small text-muted">{{ priority.detail }}</div>
+                            </div>
+                            <span class="badge {% if priority.level == 'danger' %}bg-danger{% elif priority.level == 'warning' %}bg-warning text-dark{% elif priority.level == 'success' %}bg-success{% else %}bg-info text-dark{% endif %}">
+                                Action
+                            </span>
+                        </div>
+                        {% if priority.url %}
+                        <a href="{{ priority.url }}" class="small text-decoration-none">Ouvrir</a>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="list-group-item text-muted">Aucune priorité ouverte</div>
+                    {% endfor %}
+                </div>
+                <div class="executive-fact-grid">
+                    {% for fact in executive_overview.facts %}
+                    <div class="executive-fact">
+                        <div class="small text-uppercase text-muted">{{ fact.label }}</div>
+                        <div class="value mt-2">{{ fact.value }}</div>
+                        <div class="small text-muted mt-1">{{ fact.detail }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    {% for card in executive_overview.cards %}
+    <div class="col-xl-3 col-md-6 mb-3">
+        <div class="dashboard-decision-card level-{{ card.level }}">
+            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                <div class="small text-uppercase text-muted">{{ card.title }}</div>
+                <i class="bi {{ card.icon }} text-muted"></i>
+            </div>
+            <div class="value mb-2">{{ card.value }}</div>
+            <div class="small text-muted mb-3">{{ card.detail }}</div>
+            {% if card.url %}
+            <a href="{{ card.url }}" class="small text-decoration-none">Ouvrir</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
 
 <div class="row mb-4" id="section-kpi" data-dashboard-section>
     <div class="col-lg-6 mb-3">
@@ -547,11 +824,401 @@
     </div>
 </div>
 
+<div class="row mb-4" id="section-analyst" data-dashboard-section>
+    <div class="col-12 mb-3">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0"><i class="bi bi-cpu"></i> Cockpit Data Analyst achats</h5>
+                {% if procurement_budget.usage_pct is not none %}
+                <span class="badge {% if procurement_budget.level == 'danger' %}bg-danger{% elif procurement_budget.level == 'warning' %}bg-warning text-dark{% elif procurement_budget.level == 'success' %}bg-success{% else %}bg-secondary{% endif %}">
+                    {{ "{:,.1f}".format(procurement_budget.usage_pct or 0) }}% du budget
+                </span>
+                {% else %}
+                <span class="badge bg-secondary">Budget non configuré</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <div class="small text-muted mb-3">Observe -> Analyse -> Explique -> Recommande -> Optimise</div>
+                <div class="row g-3 mb-4">
+                    {% for tile in executive_tiles %}
+                    <div class="col-xl-3 col-md-6">
+                        <div class="executive-tile level-{{ tile.level }}">
+                            <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+                                <div class="small text-uppercase text-muted">{{ tile.title }}</div>
+                                <i class="bi {{ tile.icon }} fs-5 text-muted"></i>
+                            </div>
+                            <div class="value mb-2">{{ tile.value }}</div>
+                            <div class="small text-muted">{{ tile.detail }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="row g-3">
+                    {% for card in procurement_cards %}
+                    <div class="col-xl col-lg-4 col-md-6">
+                        <div class="procurement-card level-{{ card.level }} p-3">
+                            <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+                                <div class="small text-uppercase text-muted">{{ card.title }}</div>
+                                <i class="bi {{ card.icon }} fs-5 text-muted"></i>
+                            </div>
+                            <div class="fw-semibold mb-2">{{ card.headline }}</div>
+                            <div class="small text-muted mb-3">{{ card.detail }}</div>
+                            <div class="d-flex justify-content-between align-items-center gap-2">
+                                <span class="metric">{{ card.metric }}</span>
+                                {% if card.url %}
+                                <a href="{{ card.url }}" class="small text-decoration-none">Ouvrir</a>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-currency-exchange"></i> Analyse des dépenses (Spend Analysis)</h5>
+            </div>
+            <div class="card-body">
+                <div class="small text-muted mb-3">Quels fournisseurs coûtent le plus et quels services absorbent le budget.</div>
+                <div class="row g-3 mb-3">
+                    {% for item in spend_highlights %}
+                    <div class="col-md-6">
+                        <div class="mini-highlight h-100">
+                            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                <div class="small text-uppercase text-muted">{{ item.title }}</div>
+                                <i class="bi {{ item.icon }} text-muted"></i>
+                            </div>
+                            <div class="value mb-2">{{ item.value }}</div>
+                            <div class="small text-muted">{{ item.detail }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="row">
+                    <div class="col-md-7 mb-3 mb-md-0">
+                        <div class="fw-semibold small text-uppercase text-muted mb-2">Fournisseurs les plus coûteux</div>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Fournisseur</th>
+                                        <th class="text-end">Montant</th>
+                                        <th class="text-end">Part</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in spend_supplier_rows %}
+                                    <tr>
+                                        <td>{{ item.nom }}</td>
+                                        <td class="text-end">{{ "{:,.0f}".format(item.montant or 0) }} FCFA</td>
+                                        <td class="text-end">{{ "{:,.1f}".format(item.part_achats or 0) }}%</td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="3" class="text-center text-muted py-3">Aucune donnée dépenses</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="col-md-5">
+                        <div class="fw-semibold small text-uppercase text-muted mb-2">Services les plus consommateurs</div>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Service</th>
+                                        <th class="text-end">Montant</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in spend_service_rows %}
+                                    <tr>
+                                        <td>{{ item.service }}</td>
+                                        <td class="text-end">{{ "{:,.0f}".format(item.montant or 0) }} FCFA</td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="2" class="text-center text-muted py-3">Aucun service exploitable</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-basket"></i> Produits / services les plus achetés</h5>
+            </div>
+            <div class="card-body">
+                <div class="small text-muted mb-3">Base de négociation sur les postes d’achats les plus fréquents ou les plus lourds.</div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-3">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Poste</th>
+                                <th>Type</th>
+                                <th class="text-end">Montant</th>
+                                <th class="text-end">Cmdes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in spend_purchase_rows %}
+                            <tr>
+                                <td>{{ item.label }}</td>
+                                <td>{{ item.type }}</td>
+                                <td class="text-end">{{ "{:,.0f}".format(item.montant or 0) }} FCFA</td>
+                                <td class="text-end">{{ item.commandes }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-3">Aucun poste d’achat consolidé</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="list-group list-group-flush border rounded">
+                    {% for observation in spend_observations %}
+                    <div class="list-group-item">
+                        <div class="fw-semibold">{{ observation.title }}</div>
+                        <div class="small text-muted">{{ observation.message }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-lightbulb"></i> Recommandations post-achat</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    {% for recommendation in procurement_recommendations %}
+                    <div class="list-group-item">
+                        <div class="fw-semibold">{{ recommendation.category }}</div>
+                        <div class="small text-muted">{{ recommendation.message }}</div>
+                    </div>
+                    {% else %}
+                    <div class="list-group-item text-muted">Aucune recommandation prioritaire</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-diagram-3"></i> Workflow achats piloté par la donnée</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0 procurement-workflow">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Étape</th>
+                                <th>Acteur</th>
+                                <th>Signal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for step in procurement_workflow_steps %}
+                            <tr>
+                                <td>{{ step.step }}</td>
+                                <td>{{ step.actor }}</td>
+                                <td class="small">{{ step.signal }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-calendar-check"></i> Prévisions & planification</h5>
+                {% if forecast_gap_pct is not none %}
+                <span class="badge {% if forecast_gap_pct > 0 %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                    {{ "{:+.1f}".format(forecast_gap_pct) }}%
+                </span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    {% for item in planning_highlights %}
+                    <div class="col-md-4">
+                        <div class="mini-highlight h-100">
+                            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                <div class="small text-uppercase text-muted">{{ item.title }}</div>
+                                <i class="bi {{ item.icon }} text-muted"></i>
+                            </div>
+                            <div class="value mb-2">{{ item.value }}</div>
+                            <div class="small text-muted">{{ item.detail }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Produit</th>
+                                <th class="text-end">Couverture</th>
+                                <th class="text-end">Point cmd</th>
+                                <th class="text-end">Réappro</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in planning_rows %}
+                            <tr>
+                                <td>
+                                    <strong>{{ item.nom }}</strong>
+                                    <br><small class="text-muted">{{ item.categorie }}</small>
+                                </td>
+                                <td class="text-end">
+                                    {% if item.couverture_jours is not none %}
+                                    <span class="{% if item.risk_level == 'danger' %}text-danger{% elif item.risk_level == 'warning' %}text-warning{% else %}text-info{% endif %}">
+                                        {{ "{:,.1f}".format(item.couverture_jours) }} j
+                                    </span>
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">{{ "{:,.1f}".format(item.point_commande or 0) }}</td>
+                                <td class="text-end">
+                                    {% if item.recommandee is not none %}
+                                    {{ "{:,.1f}".format(item.recommandee) }}
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-3">Aucun réapprovisionnement critique</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-exclamation-octagon"></i> Risques & anomalies</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    {% for item in risk_highlights %}
+                    <div class="col-md-4">
+                        <div class="mini-highlight h-100">
+                            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                <div class="small text-uppercase text-muted">{{ item.title }}</div>
+                                <i class="bi {{ item.icon }} text-muted"></i>
+                            </div>
+                            <div class="value mb-2">{{ item.value }}</div>
+                            <div class="small text-muted">{{ item.detail }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="list-group list-group-flush border rounded">
+                    {% for item in risk_rows %}
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div>
+                                <div class="fw-semibold">{{ item.title }}</div>
+                                <div class="small text-muted">{{ item.detail }}</div>
+                            </div>
+                            <span class="badge {% if item.level == 'danger' %}bg-danger{% elif item.level == 'warning' %}bg-warning text-dark{% else %}bg-info text-dark{% endif %}">
+                                {{ item.category }}
+                            </span>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="list-group-item text-muted">Aucune anomalie prioritaire détectée</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-gear"></i> Optimisation du processus achats</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    {% for metric in process_metrics %}
+                    <div class="col-md-6">
+                        <div class="mini-highlight h-100">
+                            <div class="small text-uppercase text-muted mb-2">{{ metric.label }}</div>
+                            <div class="value mb-2">{{ metric.value }}</div>
+                            <div class="small text-muted">{{ metric.detail }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="list-group list-group-flush border rounded">
+                    {% for item in process_recommendations %}
+                    <div class="list-group-item">
+                        <div class="fw-semibold">{{ item.title }}</div>
+                        <div class="small text-muted">{{ item.message }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-compass"></i> Aide à la décision stratégique</h5>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush border rounded mb-3">
+                    {% for item in strategic_actions %}
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div>
+                                <div class="fw-semibold">{{ item.title }}</div>
+                                <div class="small text-muted">{{ item.detail }}</div>
+                            </div>
+                            <span class="badge {% if item.level == 'danger' %}bg-danger{% elif item.level == 'warning' %}bg-warning text-dark{% elif item.level == 'success' %}bg-success{% else %}bg-info text-dark{% endif %}">
+                                Action
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="small text-muted">
+                    Objectif: réduire les coûts, mieux négocier, anticiper les ruptures et fiabiliser le cycle achats.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row mb-4" id="section-ventes" data-dashboard-section>
     <div class="col-lg-6 mb-3">
         <div class="card shadow-sm h-100">
             <div class="card-header bg-white">
-                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Évolution des achats</h5>
+                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Historique des dépenses</h5>
             </div>
             <div class="card-body dashboard-chart-shell">
                 <canvas id="chartEvolutionAchats" height="220"></canvas>

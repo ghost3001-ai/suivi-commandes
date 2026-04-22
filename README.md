@@ -66,11 +66,50 @@ python app.py
 - ✅ Performances par fournisseur
 - ✅ Évolution par produit/affaire
 - ✅ Taux de retard / Délais moyens
+- ✅ Historique des dépenses achats
+- ✅ Alertes de dépassement budget
+- ✅ Recommandations Data Analyst par étape du cycle achats
+- ✅ Scoring qualité/prix/délais des fournisseurs
+- ✅ Détection d'anomalies prix, livraison et facturation
 
 ### 📋 Audit
 - ✅ Logs complets de toutes les actions
 - ✅ IP source enregistrée
 - ✅ Consultation des historiques
+
+---
+
+## 🧠 Vision Data Analyst
+
+L'application ne sert pas seulement à saisir des commandes. Elle joue le rôle de cockpit achats orienté décision :
+
+- centraliser les données d'achats
+- analyser automatiquement les dépenses et les risques
+- recommander des actions concrètes au service achats, à la logistique et à la comptabilité
+
+En pratique, le dashboard agit comme un "cerveau" du service achats.
+
+### Cycle achats piloté par la donnée
+
+| Étape | Acteur principal | Ce que fait le Data Analyst |
+|-------|------------------|-----------------------------|
+| Analyse des dépenses | Direction / Achats | suit l'historique, compare budget vs réel, déclenche les alertes de dépassement |
+| Recherche fournisseur | Service achats | classe automatiquement les fournisseurs selon prix, qualité, délais |
+| Négociation & décision | Acheteur / Responsable | met en avant les écarts vs marché et les marges de renégociation |
+| Création commande | Service achats | signale les anomalies de cohérence sur les montants et références |
+| Livraison | Logistique / Réception | mesure retards, conformité et ruptures fournisseur |
+| Réception & validation | Magasin / Service demandeur | suit non-conformités et incidents réception |
+| Facturation & paiement | Comptabilité | détecte doublons facture et incohérences de paiement |
+| Analyse post-achat | Data Analyst | produit KPI, rapports et recommandations |
+| Amélioration continue | Direction + Data Analyst | boucle d'optimisation sur coûts, fournisseurs et processus |
+
+### Modules Data Analyst visibles dans l'application
+
+- `Dashboard intelligent` : total achats, alertes, recommandations prioritaires, historique des dépenses
+- `Spend Analysis` : lecture des dépenses par période, produit, entité et fournisseur
+- `Scoring fournisseurs` : meilleur rapport qualité/prix, fournisseur à négocier, fournisseur en retard
+- `Détection d'anomalies` : dérive prix vs marché, doublons de facture, paiements incohérents
+- `Workflow achats` : lecture synthétique du flux `besoin -> fournisseur -> négociation -> commande -> livraison -> paiement -> analyse`
 
 ---
 
@@ -91,6 +130,10 @@ MAIL_SERVER=smtp.gmail.com
 MAIL_PORT=587
 MAIL_USERNAME=votre@email.com
 MAIL_PASSWORD=app-password
+DASHBOARD_PURCHASE_BUDGET=1000000
+DASHBOARD_BUDGET_WARNING_PCT=85
+DASHBOARD_NEGOTIATION_ALERT_THRESHOLD=10
+DASHBOARD_SUPPLIER_DEPENDENCY_THRESHOLD=35
 ```
 
 ---

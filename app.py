@@ -26,6 +26,7 @@ from models import (
     Utilisateur,
     Fournisseur,
     Commande,
+    CommandeProduit,
     LogAction,
     Produit,
     Vente,
@@ -2145,7 +2146,7 @@ def import_sales_dataframe(dataframe):
 
             cumulative_quantities = defaultdict(float)
             for line_data in sale_data['lines']:
-                produit = Produit.query.get(line_data['produit_id'])
+                produit = db.session.get(Produit, line_data['produit_id'])
                 if not produit:
                     raise ValueError('Un produit importé est introuvable')
                 cumulative_quantities[produit.id] += line_data['quantite']
@@ -2170,7 +2171,7 @@ def import_sales_dataframe(dataframe):
             db.session.flush()
 
             for line_data in sale_data['lines']:
-                produit = Produit.query.get(line_data['produit_id'])
+                produit = db.session.get(Produit, line_data['produit_id'])
                 if not produit:
                     raise ValueError('Un produit importé est introuvable')
                 ligne = LigneVente(
@@ -3068,6 +3069,12 @@ def build_supplier_performance_data(start_date=None, end_date=None, fournisseur_
         service_score = score_performance or 0
         price_score = 5 if price_competitiveness_pct is None else clamp(5 - max(price_competitiveness_pct, 0) / 5, 0, 5)
         rupture_score = clamp(5 - (taux_rupture / 5), 0, 5) if row.total_commandes else 0
+        score_value = average_non_null(
+            price_score if price_competitiveness_pct is not None else None,
+            quality_score if row.total_commandes else None,
+            delay_score if deliveries_with_actual else None,
+            service_score if score_performance is not None else None,
+        )
 
         score_fiabilite = average_non_null(
             (score_performance / 5 * 100) if score_performance is not None else None,
@@ -3109,6 +3116,7 @@ def build_supplier_performance_data(start_date=None, end_date=None, fournisseur_
             'score_qualite': round(quality_score, 2),
             'score_delai': round(delay_score, 2),
             'score_prix': round(price_score, 2) if price_competitiveness_pct is not None else None,
+            'score_value': round(score_value, 2) if score_value is not None else None,
             'score_rupture': round(rupture_score, 2),
             'score_fiabilite': round(score_fiabilite, 1),
             'price_competitiveness_pct': round(price_competitiveness_pct, 1) if price_competitiveness_pct is not None else None,
@@ -3171,6 +3179,40 @@ def build_supplier_performance_data(start_date=None, end_date=None, fournisseur_
         ),
     }
 
+    best_value_supplier = max(
+        [supplier for supplier in items if supplier['score_value'] is not None],
+        key=lambda supplier: (
+            supplier['score_value'],
+            supplier['score_fiabilite'],
+            supplier['taux_conformite'],
+            -(supplier['price_competitiveness_pct'] or 0),
+            supplier['total_commandes'],
+        ),
+        default=None,
+    )
+    negotiation_supplier = max(
+        [
+            supplier for supplier in items
+            if supplier['price_competitiveness_pct'] is not None and supplier['price_competitiveness_pct'] > 0
+        ],
+        key=lambda supplier: (
+            supplier['price_competitiveness_pct'],
+            supplier['total_montant'],
+            supplier['total_commandes'],
+        ),
+        default=None,
+    )
+    late_supplier = max(
+        [supplier for supplier in items if supplier['total_commandes'] > 0],
+        key=lambda supplier: (
+            supplier['taux_retard'],
+            supplier['delai_moyen'] or 0,
+            supplier['taux_rupture'],
+            supplier['total_commandes'],
+        ),
+        default=None,
+    )
+
     return {
         'items': items,
         'top_items': items[:5],
@@ -3193,6 +3235,979 @@ def build_supplier_performance_data(start_date=None, end_date=None, fournisseur_
         'matrix_score_threshold': 4,
         'evolution_labels': [month_start.strftime('%b %Y') for month_start in month_series],
         'evolution_datasets': evolution_datasets,
+        'best_value_supplier': best_value_supplier,
+        'negotiation_supplier': negotiation_supplier,
+        'late_supplier': late_supplier,
+    }
+
+def build_supplier_decision_insight(supplier_stats):
+    """Construit un avis Data Analyst pour un fournisseur."""
+    if not supplier_stats:
+        return {
+            'level': 'secondary',
+            'title': 'Analyse indisponible',
+            'message': 'Pas assez de données fournisseurs pour recommander une action.',
+        }
+
+    negotiation_threshold = float(app.config.get('DASHBOARD_NEGOTIATION_ALERT_THRESHOLD') or 10)
+    score_value = supplier_stats.get('score_value')
+    price_gap = supplier_stats.get('price_competitiveness_pct')
+    delay_rate = supplier_stats.get('taux_retard') or 0
+    rupture_rate = supplier_stats.get('taux_rupture') or 0
+    score_fiabilite = supplier_stats.get('score_fiabilite') or 0
+    supplier_name = supplier_stats.get('nom') or 'Ce fournisseur'
+
+    if score_value is not None and score_value >= 4 and score_fiabilite >= 80:
+        return {
+            'level': 'success',
+            'title': 'Meilleur rapport qualité/prix',
+            'message': (
+                f"{supplier_name} combine un score valeur de {score_value:.2f}/5 "
+                f"et une fiabilité de {score_fiabilite:.1f}/100."
+            ),
+        }
+
+    if price_gap is not None and price_gap >= negotiation_threshold:
+        return {
+            'level': 'warning' if price_gap < negotiation_threshold * 2 else 'danger',
+            'title': 'Négociation prioritaire',
+            'message': (
+                f"Le prix observé est supérieur de {price_gap:.1f}% à la référence marché. "
+                "Renégociation recommandée."
+            ),
+        }
+
+    if delay_rate >= 20 or rupture_rate >= 10:
+        return {
+            'level': 'danger',
+            'title': 'Risque opérationnel',
+            'message': (
+                f"{supplier_name} cumule {delay_rate:.1f}% de retard et {rupture_rate:.1f}% de rupture. "
+                "Un plan correctif est recommandé."
+            ),
+        }
+
+    if score_fiabilite >= 60:
+        return {
+            'level': 'info',
+            'title': 'Fournisseur stable',
+            'message': (
+                f"{supplier_name} reste exploitable avec une fiabilité de {score_fiabilite:.1f}/100. "
+                "Surveiller prix et délais."
+            ),
+        }
+
+    return {
+        'level': 'secondary',
+        'title': 'Données insuffisantes',
+        'message': f"{supplier_name} doit être davantage évalué pour automatiser une décision fiable.",
+    }
+
+def summarize_purchase_label(value, fallback='Autre besoin', limit=56):
+    """Retourne un libellé court pour l'analyse des dépenses."""
+    text_value = nettoyer_texte_optionnel(value)
+    if not text_value:
+        return fallback
+
+    text_value = re.sub(r'\s+', ' ', text_value).strip(' -_/')
+    first_chunk = re.split(r'[;|]+', text_value)[0].strip()
+    if len(first_chunk) >= 8:
+        text_value = first_chunk
+
+    if len(text_value) > limit:
+        return f"{text_value[:limit - 3].rstrip()}..."
+    return text_value
+
+def build_spend_analysis_context(filters, commandes_query, supplier_analytics, montant_total, total_commandes, average_monthly_spend):
+    """Construit la spend analysis pour le dashboard décideurs."""
+    dependency_threshold = float(app.config.get('DASHBOARD_SUPPLIER_DEPENDENCY_THRESHOLD', 35) or 35)
+    negotiation_threshold = float(app.config.get('DASHBOARD_NEGOTIATION_ALERT_THRESHOLD') or 10)
+    average_order_amount = (float(montant_total or 0) / total_commandes) if total_commandes else 0
+
+    supplier_rows = [
+        {
+            'nom': supplier['nom'],
+            'montant': float(supplier['total_montant'] or 0),
+            'part_achats': float(supplier['part_achats'] or 0),
+            'score_value': supplier.get('score_value'),
+            'score_fiabilite': float(supplier.get('score_fiabilite') or 0),
+            'id': supplier['id'],
+        }
+        for supplier in supplier_analytics.get('items', [])[:5]
+    ]
+    top_supplier = supplier_rows[0] if supplier_rows else None
+
+    service_rows = [
+        {
+            'service': row[0] or 'Non renseigne',
+            'montant': float(row[1] or 0),
+            'commandes': int(row[2] or 0),
+            'part_achats': ((float(row[1] or 0) / float(montant_total or 1)) * 100) if montant_total else 0,
+        }
+        for row in commandes_query.with_entities(
+            Commande.service_demandeur,
+            func.coalesce(func.sum(Commande.montant), 0),
+            func.count(Commande.id),
+        ).group_by(Commande.service_demandeur)
+         .order_by(func.sum(Commande.montant).desc())
+         .limit(5)
+         .all()
+        if row[0] or row[1]
+    ]
+    top_service = service_rows[0] if service_rows else None
+
+    line_item_rows = apply_date_window(
+        db.session.query(
+            Produit.id,
+            Produit.nom,
+            func.coalesce(Produit.categorie, 'Non classe'),
+            func.coalesce(func.sum(CommandeProduit.quantite), 0),
+            func.coalesce(func.sum(CommandeProduit.montant_total), 0),
+            func.count(func.distinct(CommandeProduit.commande_id)),
+        ).join(Commande, Commande.id == CommandeProduit.commande_id)
+         .join(Produit, Produit.id == CommandeProduit.produit_id),
+        Commande.date_cde,
+        filters.get('start_date'),
+        filters.get('end_date'),
+    ).group_by(Produit.id, Produit.nom, Produit.categorie) \
+     .order_by(func.sum(CommandeProduit.montant_total).desc()) \
+     .limit(5) \
+     .all()
+
+    purchase_rows = []
+    if line_item_rows:
+        purchase_rows = [
+            {
+                'label': row[1] or 'Produit non renseigne',
+                'type': row[2] or 'Produit',
+                'montant': float(row[4] or 0),
+                'quantite': float(row[3] or 0),
+                'commandes': int(row[5] or 0),
+            }
+            for row in line_item_rows
+        ]
+    else:
+        fallback_groups = {}
+        for commande in commandes_query.options(selectinload(Commande.fournisseur)).all():
+            label = summarize_purchase_label(commande.affaire, fallback='Service non renseigne')
+            key = label.lower()
+            if key not in fallback_groups:
+                fallback_groups[key] = {
+                    'label': label,
+                    'type': commande.service_demandeur or 'Service',
+                    'montant': 0.0,
+                    'quantite': None,
+                    'commandes': 0,
+                }
+            fallback_groups[key]['montant'] += float(commande.montant or 0)
+            fallback_groups[key]['commandes'] += 1
+
+        purchase_rows = sorted(
+            fallback_groups.values(),
+            key=lambda item: item['montant'],
+            reverse=True,
+        )[:5]
+
+    over_market_count = commandes_query.filter(
+        Commande.prix_reference_marche.isnot(None),
+        Commande.prix_reference_marche > 0,
+        Commande.montant > Commande.prix_reference_marche * (1 + (negotiation_threshold / 100)),
+    ).count()
+    high_ticket_count = 0
+    if average_order_amount > 0:
+        high_ticket_count = commandes_query.filter(Commande.montant >= (average_order_amount * 1.8)).count()
+
+    dependency_count = sum(
+        1 for supplier in supplier_analytics.get('items', [])
+        if float(supplier.get('part_achats') or 0) >= dependency_threshold
+    )
+
+    spend_highlights = [
+        {
+            'title': 'Depenses totales',
+            'value': f"{float(montant_total or 0):,.0f} FCFA",
+            'detail': f"{total_commandes} commande(s) sur la periode",
+            'tone': 'primary',
+            'icon': 'bi-wallet2',
+        },
+        {
+            'title': 'Fournisseur le plus couteux',
+            'value': top_supplier['nom'] if top_supplier else '-',
+            'detail': (
+                f"{top_supplier['montant']:,.0f} FCFA ({top_supplier['part_achats']:.1f}% des achats)"
+                if top_supplier else
+                'Aucune depense fournisseur analysee'
+            ),
+            'tone': 'warning' if top_supplier and top_supplier['part_achats'] >= dependency_threshold else 'success',
+            'icon': 'bi-truck',
+        },
+        {
+            'title': 'Service le plus consommateur',
+            'value': top_service['service'] if top_service else '-',
+            'detail': (
+                f"{top_service['montant']:,.0f} FCFA sur {top_service['commandes']} commande(s)"
+                if top_service else
+                'Aucun service demandeur exploitable'
+            ),
+            'tone': 'info',
+            'icon': 'bi-building',
+        },
+        {
+            'title': 'Depenses anormales',
+            'value': f"{over_market_count + high_ticket_count}",
+            'detail': (
+                f"{over_market_count} prix au-dessus du marche, {high_ticket_count} ticket(s) eleve(s)"
+            ),
+            'tone': 'danger' if (over_market_count + high_ticket_count) else 'success',
+            'icon': 'bi-exclamation-triangle',
+        },
+    ]
+
+    spend_observations = [
+        {
+            'title': 'Concentration fournisseur',
+            'message': (
+                f"{dependency_count} fournisseur(s) depassent {dependency_threshold:.0f}% de dependance achats."
+                if dependency_count else
+                'La dependance fournisseur reste diversifiee sur la periode.'
+            ),
+        },
+        {
+            'title': 'Ticket moyen',
+            'message': f"Le ticket moyen d'achat est de {average_order_amount:,.0f} FCFA.",
+        },
+        {
+            'title': 'Rythme de depense',
+            'message': f"La moyenne mensuelle observee est de {average_monthly_spend:,.0f} FCFA.",
+        },
+    ]
+
+    return {
+        'spend_highlights': spend_highlights,
+        'spend_supplier_rows': supplier_rows,
+        'spend_service_rows': service_rows,
+        'spend_purchase_rows': purchase_rows,
+        'spend_observations': spend_observations,
+        'spend_dependency_count': dependency_count,
+        'spend_over_market_count': over_market_count,
+        'spend_high_ticket_count': high_ticket_count,
+        'top_spend_supplier': top_supplier,
+    }
+
+def build_forecast_planning_context(spend_history, stock_query):
+    """Construit une prevision simple et un plan de reapprovisionnement."""
+    history_totals = [float(item['total'] or 0) for item in spend_history]
+    forecast_basis = history_totals[-3:] if len(history_totals) >= 3 else history_totals
+    forecast_next_spend = (sum(forecast_basis) / len(forecast_basis)) if forecast_basis else 0
+    latest_spend = history_totals[-1] if history_totals else 0
+    forecast_gap_pct = ((forecast_next_spend - latest_spend) / latest_spend * 100) if latest_spend else None
+
+    planning_candidates = []
+    for produit in stock_query.all():
+        coverage = produit.couverture_stock_jours
+        reorder_qty = produit.get_quantite_reappro_recommandee()
+        lead_time = float(produit.delai_approvisionnement_jours or 0)
+        is_at_risk = (
+            produit.est_en_rupture()
+            or produit.doit_etre_reapprovisionne()
+            or (coverage is not None and coverage <= max(lead_time, 1))
+        )
+        if not is_at_risk:
+            continue
+
+        if produit.est_en_rupture():
+            risk_level = 'danger'
+            risk_label = 'Rupture'
+        elif coverage is not None and coverage <= max(lead_time, 1):
+            risk_level = 'warning'
+            risk_label = 'Critique'
+        else:
+            risk_level = 'info'
+            risk_label = 'A planifier'
+
+        planning_candidates.append({
+            'nom': produit.nom,
+            'categorie': produit.categorie or 'Non classee',
+            'stock_actuel': float(produit.stock_actuel or 0),
+            'couverture_jours': round(coverage, 1) if coverage is not None else None,
+            'point_commande': round(float(produit.point_commande or 0), 1),
+            'recommandee': round(float(reorder_qty or 0), 1) if reorder_qty is not None else None,
+            'prix_unitaire': float(produit.prix_unitaire or 0),
+            'valeur_estimee': float((reorder_qty or 0) * float(produit.prix_unitaire or 0)),
+            'lead_time': round(lead_time, 1),
+            'risk_level': risk_level,
+            'risk_label': risk_label,
+        })
+
+    planning_candidates.sort(
+        key=lambda item: (
+            item['risk_level'] != 'danger',
+            item['risk_level'] != 'warning',
+            item['couverture_jours'] if item['couverture_jours'] is not None else float('inf'),
+            -item['valeur_estimee'],
+        )
+    )
+    planning_rows = planning_candidates[:6]
+    estimated_procurement_value = sum(item['valeur_estimee'] for item in planning_candidates)
+
+    planning_highlights = [
+        {
+            'title': 'Prevision prochain mois',
+            'value': f"{forecast_next_spend:,.0f} FCFA",
+            'detail': f"Moyenne mobile sur {len(forecast_basis) or 1} mois",
+            'tone': 'primary',
+            'icon': 'bi-graph-up-arrow',
+        },
+        {
+            'title': 'Produits a reapprovisionner',
+            'value': str(len(planning_candidates)),
+            'detail': (
+                f"{sum(1 for item in planning_candidates if item['risk_level'] == 'danger')} rupture(s) ou urgence(s)"
+            ),
+            'tone': 'warning' if planning_candidates else 'success',
+            'icon': 'bi-box-seam',
+        },
+        {
+            'title': 'Valeur a planifier',
+            'value': f"{estimated_procurement_value:,.0f} FCFA",
+            'detail': 'Estimation sur les besoins stock detectes',
+            'tone': 'info',
+            'icon': 'bi-calculator',
+        },
+    ]
+
+    return {
+        'forecast_next_spend': forecast_next_spend,
+        'forecast_gap_pct': round(forecast_gap_pct, 1) if forecast_gap_pct is not None else None,
+        'forecast_basis_months': len(forecast_basis),
+        'planning_rows': planning_rows,
+        'planning_total_candidates': len(planning_candidates),
+        'planning_estimated_procurement_value': estimated_procurement_value,
+        'planning_highlights': planning_highlights,
+    }
+
+def build_risk_process_context(commandes_query, supplier_analytics):
+    """Construit la vue risques, anomalies et optimisation processus."""
+    dependency_threshold = float(app.config.get('DASHBOARD_SUPPLIER_DEPENDENCY_THRESHOLD', 35) or 35)
+    negotiation_threshold = float(app.config.get('DASHBOARD_NEGOTIATION_ALERT_THRESHOLD') or 10)
+    today = date.today()
+
+    duplicate_invoice_rows = commandes_query.with_entities(
+        Commande.facture,
+        func.count(Commande.id),
+    ).filter(
+        Commande.facture.isnot(None),
+        func.trim(Commande.facture) != '',
+    ).group_by(Commande.facture).having(func.count(Commande.id) > 1).all()
+
+    overpaid_count = commandes_query.filter(Commande.avance > Commande.montant).count()
+    off_process_filter = or_(
+        Commande.fournisseur_id.is_(None),
+        Commande.acheteur.is_(None),
+        func.trim(func.coalesce(Commande.acheteur, '')) == '',
+        func.trim(func.coalesce(Commande.service_demandeur, '')) == '',
+        func.trim(func.coalesce(Commande.bon_commande, '')) == '',
+    )
+    off_process_count = commandes_query.filter(off_process_filter).count()
+    overdue_delivery_count = commandes_query.filter(
+        Commande.date_livraison.isnot(None),
+        Commande.date_livraison < today,
+        Commande.date_reception.is_(None),
+    ).count()
+    non_compliant_count = commandes_query.filter(Commande.commande_conforme.is_(False)).count()
+
+    supplier_dependency_rows = [
+        supplier for supplier in supplier_analytics.get('items', [])
+        if float(supplier.get('part_achats') or 0) >= dependency_threshold
+    ][:3]
+
+    risk_rows = []
+    for facture, occurrence in duplicate_invoice_rows[:2]:
+        risk_rows.append({
+            'level': 'warning',
+            'category': 'Facturation',
+            'title': f'Facture {facture} dupliquee',
+            'detail': f'{int(occurrence)} commandes portent la meme facture.',
+        })
+
+    for commande in commandes_query.options(selectinload(Commande.fournisseur)).filter(
+        Commande.prix_reference_marche.isnot(None),
+        Commande.prix_reference_marche > 0,
+        Commande.montant > Commande.prix_reference_marche * (1 + (negotiation_threshold / 100)),
+    ).order_by(Commande.montant.desc()).limit(2).all():
+        ecart_pct = commande.get_ecart_prix_marche_pct()
+        risk_rows.append({
+            'level': 'danger' if (ecart_pct or 0) >= (negotiation_threshold * 2) else 'warning',
+            'category': 'Prix',
+            'title': f'Prix incoherent sur {commande.bon_commande or commande.nr or "commande"}',
+            'detail': (
+                f"{commande.fournisseur.nom if commande.fournisseur else 'Fournisseur inconnu'} "
+                f"a un ecart de {ecart_pct:+.1f}% vs marche."
+            ) if ecart_pct is not None else 'Reference marche disponible mais non conforme.',
+        })
+
+    for commande in commandes_query.options(selectinload(Commande.fournisseur)).filter(
+        Commande.date_livraison.isnot(None),
+        Commande.date_livraison < today,
+        Commande.date_reception.is_(None),
+    ).order_by(Commande.date_livraison.asc()).limit(2).all():
+        risk_rows.append({
+            'level': 'danger',
+            'category': 'Livraison',
+            'title': f'Retard sur {commande.bon_commande or commande.nr or "commande"}',
+            'detail': (
+                f"{commande.fournisseur.nom if commande.fournisseur else 'Fournisseur inconnu'} "
+                f"accumule {commande.get_delai()} jour(s) de retard."
+            ),
+        })
+
+    for commande in commandes_query.options(selectinload(Commande.fournisseur)).filter(off_process_filter).limit(2).all():
+        missing_fields = []
+        if not commande.fournisseur_id:
+            missing_fields.append('fournisseur')
+        if not (commande.acheteur or '').strip():
+            missing_fields.append('acheteur')
+        if not (commande.service_demandeur or '').strip():
+            missing_fields.append('service')
+        if not (commande.bon_commande or '').strip():
+            missing_fields.append('bon commande')
+        risk_rows.append({
+            'level': 'warning',
+            'category': 'Procedure',
+            'title': f'Achat hors procedure {commande.bon_commande or commande.nr or ""}'.strip(),
+            'detail': f"Champs manquants: {', '.join(missing_fields)}.",
+        })
+
+    timeline_rows = commandes_query.with_entities(
+        Commande.date_cde,
+        Commande.date_paiement,
+        Commande.date_reception,
+        Commande.date_livraison,
+        Commande.statut,
+    ).all()
+    payment_cycles = []
+    reception_cycles = []
+    delivery_slippages = []
+    open_payment_ages = []
+    pending_reception_count = 0
+    completed_count = 0
+
+    for row in timeline_rows:
+        if row.date_cde and row.date_paiement:
+            payment_cycles.append((row.date_paiement - row.date_cde).days)
+        if row.date_cde and row.date_reception:
+            reception_cycles.append((row.date_reception - row.date_cde).days)
+        if row.date_livraison and row.date_reception:
+            delivery_slippages.append((row.date_reception - row.date_livraison).days)
+        if row.statut == Commande.STATUT_A_PAYER and row.date_cde:
+            open_payment_ages.append((today - row.date_cde).days)
+        if row.date_paiement and not row.date_reception:
+            pending_reception_count += 1
+        if row.date_paiement and row.date_reception:
+            completed_count += 1
+
+    avg_payment_cycle = average_non_null(*payment_cycles)
+    avg_reception_cycle = average_non_null(*reception_cycles)
+    avg_delivery_slippage = average_non_null(*delivery_slippages)
+    avg_open_payment_age = average_non_null(*open_payment_ages)
+    completion_rate = ((completed_count / len(timeline_rows)) * 100) if timeline_rows else 0
+
+    if off_process_count:
+        process_bottleneck = 'Saisie / conformite'
+        process_bottleneck_detail = f'{off_process_count} achat(s) hors procedure a regulariser.'
+    elif pending_reception_count and (avg_delivery_slippage or 0) > 3:
+        process_bottleneck = 'Livraison / reception'
+        process_bottleneck_detail = f'{pending_reception_count} commande(s) payees attendent encore la reception.'
+    elif open_payment_ages and (avg_open_payment_age or 0) > 15:
+        process_bottleneck = 'Validation / paiement'
+        process_bottleneck_detail = f'Age moyen des impayes: {avg_open_payment_age:.1f} jours.'
+    else:
+        process_bottleneck = 'Flux maitrise'
+        process_bottleneck_detail = 'Aucun goulot majeur ne ressort sur la periode.'
+
+    process_metrics = [
+        {
+            'label': 'Cycle commande -> reception',
+            'value': f"{avg_reception_cycle:.1f} j" if avg_reception_cycle is not None else '-',
+            'detail': 'Duree moyenne jusqu a reception reelle',
+        },
+        {
+            'label': 'Cycle commande -> paiement',
+            'value': f"{avg_payment_cycle:.1f} j" if avg_payment_cycle is not None else '-',
+            'detail': 'Duree moyenne jusqu au paiement fournisseur',
+        },
+        {
+            'label': 'Taux d achevement',
+            'value': f"{completion_rate:.1f}%",
+            'detail': 'Commandes payees et recues',
+        },
+        {
+            'label': 'Goulot principal',
+            'value': process_bottleneck,
+            'detail': process_bottleneck_detail,
+        },
+    ]
+
+    process_recommendations = []
+    if supplier_dependency_rows:
+        process_recommendations.append({
+            'title': 'Limiter la dependance fournisseur',
+            'message': (
+                f"{supplier_dependency_rows[0]['nom']} pese {supplier_dependency_rows[0]['part_achats']:.1f}% des achats. "
+                "Diversifier ou negocier un contrat cadre."
+            ),
+        })
+    if overdue_delivery_count:
+        process_recommendations.append({
+            'title': 'Traiter les retards livraison',
+            'message': f'{overdue_delivery_count} commande(s) depassent la date de livraison prevue.',
+        })
+    if off_process_count:
+        process_recommendations.append({
+            'title': 'Bloquer les achats hors procedure',
+            'message': "Rendre obligatoires fournisseur, acheteur, service et bon de commande sur tous les imports.",
+        })
+    if duplicate_invoice_rows or overpaid_count:
+        process_recommendations.append({
+            'title': 'Renforcer le controle facture',
+            'message': (
+                f"{len(duplicate_invoice_rows)} doublon(s) facture et {overpaid_count} paiement(s) incoherent(s) detectes."
+            ),
+        })
+    if not process_recommendations:
+        process_recommendations.append({
+            'title': 'Maintenir le pilotage',
+            'message': 'Le processus reste stable. Continuer le suivi des prix, delais et conformite.',
+        })
+
+    risk_highlights = [
+        {
+            'title': 'Alertes critiques',
+            'value': str(
+                len([row for row in risk_rows if row['level'] == 'danger']) + overpaid_count
+            ),
+            'detail': 'Prix, retards et paiements incoherents',
+            'tone': 'danger' if risk_rows or overpaid_count else 'success',
+            'icon': 'bi-shield-exclamation',
+        },
+        {
+            'title': 'Achats hors procedure',
+            'value': str(off_process_count),
+            'detail': 'Commandes incompletes ou non conformes au workflow',
+            'tone': 'warning' if off_process_count else 'success',
+            'icon': 'bi-diagram-2',
+        },
+        {
+            'title': 'Risque fournisseur',
+            'value': str(len(supplier_dependency_rows)),
+            'detail': f"Fournisseur(s) au-dessus de {dependency_threshold:.0f}% de dependance",
+            'tone': 'warning' if supplier_dependency_rows else 'success',
+            'icon': 'bi-person-exclamation',
+        },
+    ]
+
+    return {
+        'risk_rows': risk_rows[:6],
+        'risk_highlights': risk_highlights,
+        'process_metrics': process_metrics,
+        'process_recommendations': process_recommendations,
+        'off_process_count': off_process_count,
+        'overdue_delivery_count': overdue_delivery_count,
+        'duplicate_invoice_count': len(duplicate_invoice_rows),
+        'overpaid_count': overpaid_count,
+        'supplier_dependency_rows': supplier_dependency_rows,
+        'process_bottleneck': process_bottleneck,
+        'non_compliant_count': non_compliant_count,
+    }
+
+def build_procurement_analyst_context(filters, commandes_query, stock_query, montant_total, total_commandes, total_a_payer, supplier_analytics):
+    """Construit les signaux Data Analyst pour le cycle achats."""
+    history_series = get_month_series_between(
+        filters.get('start_date'),
+        filters.get('end_date'),
+        fallback_months=12,
+    )
+    spend_history = build_monthly_evolution(
+        commandes_query,
+        Commande.date_cde,
+        Commande.montant,
+        month_series=history_series,
+    )
+    history_totals = [float(item['total'] or 0) for item in spend_history]
+    average_monthly_spend = (sum(history_totals) / len(history_totals)) if history_totals else 0
+    latest_spend = history_totals[-1] if history_totals else 0
+    previous_spend = history_totals[-2] if len(history_totals) > 1 else None
+    spend_trend_pct = ((latest_spend - previous_spend) / previous_spend * 100) if previous_spend else None
+    peak_spend = max(spend_history, key=lambda item: item['total'], default=None)
+
+    budget_target = float(app.config.get('DASHBOARD_PURCHASE_BUDGET') or 0)
+    budget_warning_pct = float(app.config.get('DASHBOARD_BUDGET_WARNING_PCT') or 85)
+    budget_usage_pct = (float(montant_total or 0) / budget_target * 100) if budget_target > 0 else None
+    budget_remaining = max(budget_target - float(montant_total or 0), 0) if budget_target > 0 else None
+    budget_overrun = max(float(montant_total or 0) - budget_target, 0) if budget_target > 0 else None
+
+    if budget_usage_pct is None:
+        budget_level = 'info'
+        budget_headline = 'Aucun budget achats configuré'
+        budget_detail = (
+            f"Historique moyen {average_monthly_spend:,.0f} FCFA/mois. "
+            "Définis `DASHBOARD_PURCHASE_BUDGET` pour activer les alertes."
+        )
+        budget_metric = 'Budget off'
+    elif budget_usage_pct >= 100:
+        budget_level = 'danger'
+        budget_headline = f"Budget dépassé à {budget_usage_pct:.1f}%"
+        budget_detail = (
+            f"Dépassement de {budget_overrun:,.0f} FCFA. "
+            f"Pic observé {peak_spend['mois']} à {peak_spend['total']:,.0f} FCFA."
+            if peak_spend else
+            f"Dépassement de {budget_overrun:,.0f} FCFA."
+        )
+        budget_metric = f"{budget_overrun:,.0f} FCFA"
+    elif budget_usage_pct >= budget_warning_pct:
+        budget_level = 'warning'
+        budget_headline = f"Attention : budget déjà utilisé à {budget_usage_pct:.1f}%"
+        budget_detail = (
+            f"Reste {budget_remaining:,.0f} FCFA. "
+            f"Moyenne mensuelle {average_monthly_spend:,.0f} FCFA."
+        )
+        budget_metric = f"{budget_remaining:,.0f} FCFA restants"
+    else:
+        budget_level = 'success'
+        budget_headline = f"Budget utilisé à {budget_usage_pct:.1f}%"
+        budget_detail = (
+            f"Reste {budget_remaining:,.0f} FCFA. "
+            f"Tendance mensuelle {spend_trend_pct:+.1f}%."
+            if spend_trend_pct is not None else
+            f"Reste {budget_remaining:,.0f} FCFA."
+        )
+        budget_metric = f"{budget_remaining:,.0f} FCFA restants"
+
+    best_value_supplier = supplier_analytics.get('best_value_supplier')
+    negotiation_supplier = supplier_analytics.get('negotiation_supplier')
+    late_supplier = supplier_analytics.get('late_supplier')
+    negotiation_threshold = float(app.config.get('DASHBOARD_NEGOTIATION_ALERT_THRESHOLD') or 10)
+    spend_analysis = build_spend_analysis_context(
+        filters,
+        commandes_query,
+        supplier_analytics,
+        montant_total,
+        total_commandes,
+        average_monthly_spend,
+    )
+    forecast_context = build_forecast_planning_context(spend_history, stock_query)
+    risk_process_context = build_risk_process_context(commandes_query, supplier_analytics)
+
+    if best_value_supplier:
+        supplier_level = 'success' if (best_value_supplier.get('score_value') or 0) >= 4 else 'info'
+        supplier_headline = f"{best_value_supplier['nom']} = meilleur rapport qualité/prix"
+        supplier_detail = (
+            f"Score valeur {float(best_value_supplier['score_value'] or 0):.2f}/5, "
+            f"fiabilité {float(best_value_supplier['score_fiabilite'] or 0):.1f}/100, "
+            f"conformité {float(best_value_supplier['taux_conformite'] or 0):.1f}%."
+        )
+        supplier_metric = f"{float(best_value_supplier['total_montant'] or 0):,.0f} FCFA"
+    else:
+        supplier_level = 'secondary'
+        supplier_headline = 'Scoring fournisseurs à consolider'
+        supplier_detail = "Ajoute des notes, délais réels et références marché pour automatiser le classement."
+        supplier_metric = 'Pas assez de données'
+
+    price_alert_count = commandes_query.filter(
+        Commande.prix_reference_marche.isnot(None),
+        Commande.prix_reference_marche > 0,
+        Commande.montant > Commande.prix_reference_marche * (1 + (negotiation_threshold / 100)),
+    ).count()
+    if negotiation_supplier:
+        negotiation_gap = float(negotiation_supplier.get('price_competitiveness_pct') or 0)
+        negotiation_level = 'danger' if negotiation_gap >= negotiation_threshold * 2 else 'warning'
+        negotiation_headline = (
+            f"Le prix observé chez {negotiation_supplier['nom']} est supérieur de {negotiation_gap:.1f}% au marché"
+        )
+        negotiation_detail = (
+            f"{price_alert_count} commande(s) dépassent la référence marché de {negotiation_threshold:.0f}% ou plus."
+        )
+        negotiation_metric = f"{negotiation_gap:+.1f}%"
+    else:
+        negotiation_level = 'success'
+        negotiation_headline = 'Prix achats globalement cohérents'
+        negotiation_detail = "Aucune dérive majeure vs référence marché sur la période filtrée."
+        negotiation_metric = f"{price_alert_count} alerte(s)"
+
+    non_compliant_count = commandes_query.filter(Commande.commande_conforme.is_(False)).count()
+    rupture_count = commandes_query.filter(Commande.rupture_fournisseur.is_(True)).count()
+    if late_supplier and ((late_supplier.get('taux_retard') or 0) > 0 or (late_supplier.get('delai_moyen') or 0) > 0):
+        operations_level = 'danger' if (late_supplier.get('taux_retard') or 0) >= 25 else 'warning'
+        operations_headline = f"{late_supplier['nom']} livre souvent en retard"
+        operations_detail = (
+            f"Retard {float(late_supplier['taux_retard'] or 0):.1f}% • "
+            f"délai moyen {float(late_supplier['delai_moyen'] or 0):.1f} j • "
+            f"non conformités {non_compliant_count} • ruptures {rupture_count}."
+        )
+        operations_metric = f"{float(late_supplier['taux_retard'] or 0):.1f}% retard"
+    else:
+        operations_level = 'success'
+        operations_headline = 'Livraisons et réceptions sous contrôle'
+        operations_detail = (
+            f"Non conformités {non_compliant_count} • ruptures {rupture_count}. "
+            "Aucun fournisseur ne ressort comme fortement retardataire."
+        )
+        operations_metric = f"{non_compliant_count + rupture_count} incident(s)"
+
+    duplicate_invoice_count = risk_process_context['duplicate_invoice_count']
+    overpaid_count = risk_process_context['overpaid_count']
+    if duplicate_invoice_count or overpaid_count:
+        billing_level = 'danger' if overpaid_count else 'warning'
+        billing_headline = (
+            f"{duplicate_invoice_count} facture(s) dupliquée(s) et {overpaid_count} paiement(s) incohérent(s)"
+        )
+        billing_detail = f"{float(total_a_payer or 0):,.0f} FCFA restent à rapprocher ou payer."
+        billing_metric = f"{duplicate_invoice_count + overpaid_count} anomalie(s)"
+    else:
+        billing_level = 'info'
+        billing_headline = 'Flux facturation/paiement cohérent'
+        billing_detail = f"{float(total_a_payer or 0):,.0f} FCFA restent à payer sur la période."
+        billing_metric = f"{float(total_a_payer or 0):,.0f} FCFA"
+
+    procurement_cards = [
+        {
+            'title': 'Historique des dépenses',
+            'icon': 'bi-graph-up-arrow',
+            'level': budget_level,
+            'headline': budget_headline,
+            'detail': budget_detail,
+            'metric': budget_metric,
+            'url': url_for('dashboard') if has_request_context() else None,
+        },
+        {
+            'title': 'Recherche & sélection fournisseur',
+            'icon': 'bi-stars',
+            'level': supplier_level,
+            'headline': supplier_headline,
+            'detail': supplier_detail,
+            'metric': supplier_metric,
+            'url': (
+                url_for('performance_fournisseur_detail', id=best_value_supplier['id'])
+                if has_request_context() and best_value_supplier else
+                (url_for('performances_fournisseurs') if has_request_context() else None)
+            ),
+        },
+        {
+            'title': 'Négociation & décision',
+            'icon': 'bi-cash-coin',
+            'level': negotiation_level,
+            'headline': negotiation_headline,
+            'detail': negotiation_detail,
+            'metric': negotiation_metric,
+            'url': url_for('performances_fournisseurs') if has_request_context() else None,
+        },
+        {
+            'title': 'Livraison & réception',
+            'icon': 'bi-truck',
+            'level': operations_level,
+            'headline': operations_headline,
+            'detail': operations_detail,
+            'metric': operations_metric,
+            'url': url_for('performances_fournisseurs') if has_request_context() else None,
+        },
+        {
+            'title': 'Facturation & paiement',
+            'icon': 'bi-receipt-cutoff',
+            'level': billing_level,
+            'headline': billing_headline,
+            'detail': billing_detail,
+            'metric': billing_metric,
+            'url': url_for('commandes') if has_request_context() else None,
+        },
+    ]
+
+    recommendations = []
+    if budget_usage_pct is not None and budget_usage_pct >= budget_warning_pct:
+        recommendations.append({
+            'category': 'Budget',
+            'message': budget_headline,
+        })
+    if best_value_supplier:
+        recommendations.append({
+            'category': 'Fournisseurs',
+            'message': supplier_headline,
+        })
+    if negotiation_supplier:
+        recommendations.append({
+            'category': 'Négociation',
+            'message': negotiation_headline,
+        })
+    if late_supplier and ((late_supplier.get('taux_retard') or 0) >= 10):
+        recommendations.append({
+            'category': 'Livraison',
+            'message': operations_headline,
+        })
+    if duplicate_invoice_count or overpaid_count:
+        recommendations.append({
+            'category': 'Facturation',
+            'message': billing_headline,
+        })
+    if not recommendations:
+        recommendations.append({
+            'category': 'Post-achat',
+            'message': "Aucune dérive majeure détectée. Continuer le suivi des prix, délais et non-conformités.",
+        })
+
+    strategic_actions = []
+    if spend_analysis.get('top_spend_supplier') and (spend_analysis['top_spend_supplier']['part_achats'] or 0) >= app.config.get('DASHBOARD_SUPPLIER_DEPENDENCY_THRESHOLD', 35):
+        strategic_actions.append({
+            'title': 'Réduire la concentration fournisseur',
+            'detail': (
+                f"{spend_analysis['top_spend_supplier']['nom']} représente "
+                f"{spend_analysis['top_spend_supplier']['part_achats']:.1f}% des achats."
+            ),
+            'level': 'warning',
+        })
+    if negotiation_supplier:
+        strategic_actions.append({
+            'title': 'Renégocier les prix',
+            'detail': negotiation_headline,
+            'level': negotiation_level,
+        })
+    if forecast_context.get('planning_total_candidates'):
+        strategic_actions.append({
+            'title': 'Planifier les réapprovisionnements',
+            'detail': (
+                f"{forecast_context['planning_total_candidates']} produit(s) nécessitent une action "
+                f"pour environ {forecast_context['planning_estimated_procurement_value']:,.0f} FCFA."
+            ),
+            'level': 'info',
+        })
+    if risk_process_context.get('off_process_count'):
+        strategic_actions.append({
+            'title': 'Fiabiliser le workflow achats',
+            'detail': f"{risk_process_context['off_process_count']} achat(s) hors procédure restent à corriger.",
+            'level': 'danger' if risk_process_context['off_process_count'] > 3 else 'warning',
+        })
+    if not strategic_actions:
+        strategic_actions.append({
+            'title': 'Maintenir le pilotage',
+            'detail': "Les indicateurs restent stables. Continuer l'analyse mensuelle fournisseurs, prix et stock.",
+            'level': 'success',
+        })
+
+    executive_tiles = [
+        {
+            'title': 'Depenses a piloter',
+            'value': f"{float(montant_total or 0):,.0f} FCFA",
+            'detail': f"Moyenne mensuelle {average_monthly_spend:,.0f} FCFA",
+            'level': budget_level,
+            'icon': 'bi-wallet2',
+        },
+        {
+            'title': 'Fournisseur a privilegier',
+            'value': best_value_supplier['nom'] if best_value_supplier else '-',
+            'detail': supplier_headline if best_value_supplier else 'Renseigner plus de notes pour automatiser le classement',
+            'level': supplier_level,
+            'icon': 'bi-stars',
+        },
+        {
+            'title': 'Prevision & planification',
+            'value': f"{forecast_context['forecast_next_spend']:,.0f} FCFA",
+            'detail': (
+                f"{forecast_context['planning_total_candidates']} produit(s) a planifier"
+                if forecast_context['planning_total_candidates'] else
+                f"Projection simple sur {forecast_context['forecast_basis_months'] or 1} mois"
+            ),
+            'level': 'warning' if forecast_context['planning_total_candidates'] else 'info',
+            'icon': 'bi-graph-up-arrow',
+        },
+        {
+            'title': 'Risques a traiter',
+            'value': str(
+                duplicate_invoice_count
+                + overpaid_count
+                + risk_process_context['off_process_count']
+                + risk_process_context['overdue_delivery_count']
+            ),
+            'detail': risk_process_context['process_bottleneck'],
+            'level': 'danger' if risk_process_context['risk_rows'] else 'success',
+            'icon': 'bi-shield-exclamation',
+        },
+    ]
+
+    workflow_steps = [
+        {
+            'step': 'Analyse des dépenses',
+            'actor': 'Data Analyst',
+            'signal': budget_headline,
+        },
+        {
+            'step': 'Recherche fournisseur',
+            'actor': 'Service achats',
+            'signal': supplier_headline,
+        },
+        {
+            'step': 'Négociation',
+            'actor': 'Acheteur / Responsable',
+            'signal': negotiation_headline,
+        },
+        {
+            'step': 'Commande & cohérence',
+            'actor': 'Service achats',
+            'signal': (
+                f"{price_alert_count} commande(s) à vérifier vs référence marché"
+                if price_alert_count else
+                'Pas d’anomalie prix majeure détectée'
+            ),
+        },
+        {
+            'step': 'Livraison & réception',
+            'actor': 'Logistique / Magasin',
+            'signal': operations_headline,
+        },
+        {
+            'step': 'Facturation & paiement',
+            'actor': 'Comptabilité',
+            'signal': billing_headline,
+        },
+        {
+            'step': 'Analyse post-achat',
+            'actor': 'Data Analyst',
+            'signal': f"{len(recommendations)} recommandation(s) prioritaire(s) émises",
+        },
+        {
+            'step': 'Amélioration continue',
+            'actor': 'Data Analyst + Direction',
+            'signal': 'Boucle d’optimisation active sur coûts, fournisseurs et risques',
+        },
+    ]
+
+    return {
+        'procurement_budget': {
+            'target': budget_target,
+            'usage_pct': round(budget_usage_pct, 1) if budget_usage_pct is not None else None,
+            'warning_pct': budget_warning_pct,
+            'remaining': budget_remaining,
+            'overrun': budget_overrun,
+            'level': budget_level,
+        },
+        'executive_tiles': executive_tiles,
+        'procurement_cards': procurement_cards,
+        'procurement_recommendations': recommendations,
+        'strategic_actions': strategic_actions,
+        'procurement_workflow_steps': workflow_steps,
+        'procurement_summary': {
+            'average_monthly_spend': round(average_monthly_spend, 1),
+            'latest_spend': latest_spend,
+            'spend_trend_pct': round(spend_trend_pct, 1) if spend_trend_pct is not None else None,
+            'peak_month': peak_spend['mois'] if peak_spend else None,
+            'peak_amount': peak_spend['total'] if peak_spend else 0,
+            'duplicate_invoice_count': duplicate_invoice_count,
+            'overpaid_count': overpaid_count,
+            'non_compliant_count': non_compliant_count,
+            'rupture_count': rupture_count,
+            'price_alert_count': price_alert_count,
+            'best_value_supplier_name': best_value_supplier['nom'] if best_value_supplier else None,
+        },
+        **spend_analysis,
+        **forecast_context,
+        **risk_process_context,
     }
 
 def build_supplier_filters(args, default_period='all'):
@@ -3276,6 +4291,7 @@ def get_supplier_detail_payload(fournisseur, filters, evolution_months=12):
         'score_delai': 0,
         'score_service': None,
         'score_prix': None,
+        'score_value': None,
         'score_fiabilite': 0,
         'quadrant': 'NON_NOTÉ',
     }
@@ -3306,6 +4322,10 @@ def get_supplier_detail_payload(fournisseur, filters, evolution_months=12):
         {'label': 'Service après-vente', 'value': supplier_stats['score_service'] if supplier_stats['score_service'] is not None else 0},
         {'label': 'Satisfaction', 'value': supplier_stats['score_performance'] if supplier_stats['score_performance'] is not None else 0},
     ]
+    supplier_insight = build_supplier_decision_insight({
+        **supplier_stats,
+        'nom': fournisseur.nom,
+    })
     statut_repartition = [
         {'statut': row[0], 'count': row[1]}
         for row in apply_date_window(
@@ -3325,6 +4345,7 @@ def get_supplier_detail_payload(fournisseur, filters, evolution_months=12):
         'score_evolution': score_evolution,
         'radar_metrics': radar_metrics,
         'statut_repartition': statut_repartition,
+        'supplier_insight': supplier_insight,
     }
 
 def build_dashboard_context(filters):
@@ -3455,6 +4476,15 @@ def build_dashboard_context(filters):
         .distinct()\
         .order_by(Vente.region.asc())\
         .all()
+    procurement_context = build_procurement_analyst_context(
+        filters,
+        commandes_query,
+        stock_query,
+        montant_total,
+        total_commandes,
+        total_a_payer,
+        supplier_analytics,
+    )
 
     context = {
         'filtres': filters,
@@ -3503,16 +4533,20 @@ def build_dashboard_context(filters):
         'dashboard_scheduler_enabled': app.config.get('DASHBOARD_SCHEDULER_ENABLED', False),
         'dashboard_ca_threshold': app.config.get('DASHBOARD_CA_ALERT_THRESHOLD'),
         'dashboard_product_threshold': app.config.get('DASHBOARD_PRODUCT_ALERT_THRESHOLD'),
+        'dashboard_purchase_budget': app.config.get('DASHBOARD_PURCHASE_BUDGET'),
+        'dashboard_budget_warning_pct': app.config.get('DASHBOARD_BUDGET_WARNING_PCT'),
         'subscriptions': DashboardSubscription.query.filter_by(actif=True)
             .order_by(DashboardSubscription.email.asc(), DashboardSubscription.frequency.asc())
             .all(),
     }
     context.update(sales_analytics)
+    context.update(procurement_context)
     alerts_payload = get_dashboard_alerts(filters, context)
     context.update({
         'dashboard_alerts': alerts_payload['alerts'],
         'dashboard_alert_counts': alerts_payload['counts'],
         'low_performing_products': get_low_performing_products(filters, limit=5),
+        'executive_overview': build_dashboard_executive_overview(filters, context, alerts_payload),
     })
 
     if has_request_context():
@@ -3555,6 +4589,223 @@ def build_filter_querystring(filters):
         if value:
             params[key] = value
     return urlencode(params)
+
+
+def get_dashboard_period_label(filters):
+    """Retourne un libellé simple et lisible pour la période active."""
+    start_date = filters.get('start_date')
+    end_date = filters.get('end_date')
+    period = (filters.get('period') or '').strip().lower()
+
+    if start_date and end_date:
+        if start_date == end_date:
+            return f"Le {start_date.strftime('%d/%m/%Y')}"
+        return f"Du {start_date.strftime('%d/%m/%Y')} au {end_date.strftime('%d/%m/%Y')}"
+    if start_date:
+        return f"Depuis le {start_date.strftime('%d/%m/%Y')}"
+    if end_date:
+        return f"Jusqu'au {end_date.strftime('%d/%m/%Y')}"
+
+    period_labels = {
+        'today': "Aujourd'hui",
+        'week': 'Cette semaine',
+        'month': 'Ce mois',
+        'year': 'Cette année',
+        'custom': 'Période personnalisée',
+        'all': 'Toutes les données',
+    }
+    return period_labels.get(period, 'Période filtrée')
+
+
+def resolve_dashboard_action_url(title):
+    """Mappe une action exécutive vers la vue la plus pertinente."""
+    if not has_request_context():
+        return None
+
+    normalized_title = (title or '').strip().lower()
+    if any(keyword in normalized_title for keyword in ('fournisseur', 'prix', 'négoci', 'negoci')):
+        return url_for('performances_fournisseurs')
+    if any(keyword in normalized_title for keyword in ('réappro', 'reappro', 'stock')):
+        return url_for('stocks')
+    if any(keyword in normalized_title for keyword in ('workflow', 'procédure', 'procedure', 'paiement', 'facturation')):
+        return url_for('commandes')
+    return url_for('dashboard')
+
+
+def build_dashboard_executive_overview(filters, context, alerts_payload):
+    """Construit une lecture dirigeant simple au-dessus du dashboard détaillé."""
+    counts = alerts_payload.get('counts', {})
+    danger_count = int(counts.get('danger') or 0)
+    warning_count = int(counts.get('warning') or 0)
+    info_count = int(counts.get('info') or 0)
+    off_process_count = int(context.get('off_process_count') or 0)
+    rupture_count = int(context.get('nb_ruptures_stock') or 0)
+    overdue_delivery_count = int(context.get('overdue_delivery_count') or 0)
+
+    health_score = int(round(clamp(
+        100
+        - (danger_count * 16)
+        - (warning_count * 7)
+        - min(off_process_count * 3, 12)
+        - min(rupture_count * 5, 15)
+        - min(overdue_delivery_count * 4, 12),
+        18,
+        100,
+    )))
+
+    if health_score < 50:
+        overall_level = 'danger'
+        status_label = 'Priorité critique'
+    elif health_score < 70:
+        overall_level = 'warning'
+        status_label = 'Sous tension'
+    elif health_score < 85:
+        overall_level = 'info'
+        status_label = 'Sous surveillance'
+    else:
+        overall_level = 'success'
+        status_label = 'Sous contrôle'
+
+    strategic_actions = context.get('strategic_actions') or []
+    primary_action = strategic_actions[0] if strategic_actions else None
+    primary_alert = (alerts_payload.get('alerts') or [None])[0]
+    if primary_action:
+        headline = primary_action['title']
+        message = primary_action['detail']
+    elif primary_alert:
+        headline = primary_alert['title']
+        message = primary_alert['message']
+    else:
+        headline = 'Pilotage globalement maîtrisé'
+        message = "Aucune alerte critique majeure n'est remontée sur la période analysée."
+
+    budget = context.get('procurement_budget') or {}
+    budget_usage = budget.get('usage_pct')
+    budget_overrun = float(budget.get('overrun') or 0)
+    budget_remaining = float(budget.get('remaining') or 0)
+    if budget_usage is None:
+        budget_value = 'Off'
+        budget_detail = 'Budget achats non configuré'
+    elif budget_overrun > 0:
+        budget_value = f"{budget_usage:.1f}%"
+        budget_detail = f"Dépassement de {budget_overrun:,.0f} FCFA"
+    else:
+        budget_value = f"{budget_usage:.1f}%"
+        budget_detail = f"{budget_remaining:,.0f} FCFA restants"
+
+    process_bottleneck_metric = next(
+        (metric for metric in (context.get('process_metrics') or []) if metric.get('label') == 'Goulot principal'),
+        None,
+    )
+    process_value = (
+        process_bottleneck_metric.get('value')
+        if process_bottleneck_metric else
+        context.get('process_bottleneck') or 'Flux maîtrisé'
+    )
+    process_detail = (
+        process_bottleneck_metric.get('detail')
+        if process_bottleneck_metric else
+        'Lecture synthétique du point de blocage principal.'
+    )
+    process_level = 'success' if process_value in {'Flux maitrise', 'Flux maîtrisé'} else 'warning'
+
+    dashboard_url = url_for('dashboard') if has_request_context() else None
+    first_alert_url = primary_alert.get('url') if primary_alert else dashboard_url
+    action_url = resolve_dashboard_action_url(primary_action['title']) if primary_action else dashboard_url
+    top_supplier = context.get('top_spend_supplier')
+
+    priorities = []
+    if strategic_actions:
+        for action in strategic_actions[:3]:
+            priorities.append({
+                'title': action['title'],
+                'detail': action['detail'],
+                'level': action['level'],
+                'url': resolve_dashboard_action_url(action['title']),
+            })
+    else:
+        for alert in (alerts_payload.get('alerts') or [])[:3]:
+            priorities.append({
+                'title': alert['title'],
+                'detail': alert['message'],
+                'level': alert['level'],
+                'url': alert.get('url'),
+            })
+
+    facts = [
+        {
+            'label': 'Période analysée',
+            'value': get_dashboard_period_label(filters),
+            'detail': 'Fenêtre active du reporting',
+        },
+        {
+            'label': 'Budget achats',
+            'value': budget_value,
+            'detail': budget_detail,
+        },
+        {
+            'label': 'Top fournisseur',
+            'value': top_supplier['nom'] if top_supplier else '-',
+            'detail': (
+                f"{float(top_supplier['part_achats'] or 0):.1f}% des achats"
+                if top_supplier else
+                'Aucune concentration critique remontée'
+            ),
+        },
+        {
+            'label': 'Trésorerie',
+            'value': f"{float(context.get('total_a_payer') or 0):,.0f} FCFA",
+            'detail': 'reste à payer aux fournisseurs',
+        },
+    ]
+
+    cards = [
+        {
+            'title': 'Budget',
+            'value': budget_value,
+            'detail': budget_detail,
+            'level': budget.get('level') or overall_level,
+            'icon': 'bi-wallet2',
+            'url': dashboard_url,
+        },
+        {
+            'title': 'Alertes critiques',
+            'value': str(danger_count),
+            'detail': f"{warning_count} avertissement(s) et {info_count} information(s)",
+            'level': 'danger' if danger_count else ('warning' if warning_count else 'success'),
+            'icon': 'bi-broadcast-pin',
+            'url': first_alert_url,
+        },
+        {
+            'title': 'Goulot principal',
+            'value': process_value,
+            'detail': process_detail,
+            'level': process_level,
+            'icon': 'bi-diagram-3',
+            'url': url_for('commandes') if has_request_context() else None,
+        },
+        {
+            'title': 'Décision prioritaire',
+            'value': primary_action['title'] if primary_action else 'Maintenir le pilotage',
+            'detail': primary_action['detail'] if primary_action else message,
+            'level': primary_action['level'] if primary_action else overall_level,
+            'icon': 'bi-compass',
+            'url': action_url,
+        },
+    ]
+
+    return {
+        'health_score': health_score,
+        'level': overall_level,
+        'status_label': status_label,
+        'headline': headline,
+        'message': message,
+        'generated_at_label': datetime.now().strftime('%d/%m/%Y %H:%M'),
+        'period_label': get_dashboard_period_label(filters),
+        'cards': cards,
+        'priorities': priorities,
+        'facts': facts,
+    }
 
 def get_filtered_commandes_query(filters):
     return apply_date_window(
@@ -4257,6 +5508,25 @@ def get_dashboard_alerts(filters=None, context=None):
     filters = filters or get_default_sales_filters()
     context = context or build_dashboard_context(filters)
     alerts = []
+    procurement_budget = context.get('procurement_budget') or {}
+    procurement_summary = context.get('procurement_summary') or {}
+    procurement_cards = context.get('procurement_cards') or []
+
+    if procurement_budget.get('usage_pct') is not None and procurement_budget['usage_pct'] >= procurement_budget.get('warning_pct', 85):
+        budget_level = 'danger' if procurement_budget['usage_pct'] >= 100 else 'warning'
+        budget_message = (
+            f"Attention : budget déjà utilisé à {procurement_budget['usage_pct']:.1f}%"
+            if budget_level == 'warning' else
+            f"Budget achats dépassé à {procurement_budget['usage_pct']:.1f}%"
+        )
+        alerts.append({
+            'id': 'budget-usage',
+            'level': budget_level,
+            'category': 'BUDGET',
+            'title': 'Budget achats sous tension',
+            'message': budget_message,
+            'url': url_for('dashboard') if has_request_context() else None,
+        })
 
     if (context.get('chiffre_affaires_net') or 0) < app.config['DASHBOARD_CA_ALERT_THRESHOLD']:
         alerts.append({
@@ -4329,6 +5599,66 @@ def get_dashboard_alerts(filters=None, context=None):
             'url': url_for('ventes') if has_request_context() else None,
         })
 
+    if procurement_summary.get('duplicate_invoice_count') or procurement_summary.get('overpaid_count'):
+        alerts.append({
+            'id': 'billing-anomaly',
+            'level': 'danger' if procurement_summary.get('overpaid_count') else 'warning',
+            'category': 'FACTURATION',
+            'title': 'Anomalies de facturation/paiement',
+            'message': (
+                f"{procurement_summary.get('duplicate_invoice_count', 0)} facture(s) dupliquée(s), "
+                f"{procurement_summary.get('overpaid_count', 0)} paiement(s) incohérent(s)."
+            ),
+            'url': url_for('commandes') if has_request_context() else None,
+        })
+
+    if (context.get('spend_dependency_count') or 0) > 0 and context.get('top_spend_supplier'):
+        alerts.append({
+            'id': 'supplier-dependency',
+            'level': 'warning',
+            'category': 'FOURNISSEUR',
+            'title': 'Dépendance fournisseur',
+            'message': (
+                f"{context['top_spend_supplier']['nom']} pèse "
+                f"{float(context['top_spend_supplier']['part_achats'] or 0):.1f}% des achats."
+            ),
+            'url': url_for('performances_fournisseurs') if has_request_context() else None,
+        })
+
+    if (context.get('off_process_count') or 0) > 0:
+        alerts.append({
+            'id': 'off-process',
+            'level': 'warning',
+            'category': 'PROCESS',
+            'title': 'Achats hors procédure',
+            'message': f"{context['off_process_count']} commande(s) ont des champs workflow manquants.",
+            'url': url_for('commandes') if has_request_context() else None,
+        })
+
+    if (context.get('planning_total_candidates') or 0) > 0:
+        alerts.append({
+            'id': 'reorder-planning',
+            'level': 'info',
+            'category': 'PLANIFICATION',
+            'title': 'Réapprovisionnement à planifier',
+            'message': f"{context['planning_total_candidates']} produit(s) nécessitent une action d'achat.",
+            'url': url_for('stocks') if has_request_context() else None,
+        })
+
+    negotiation_card = next(
+        (card for card in procurement_cards if card.get('title') == 'Négociation & décision'),
+        None,
+    )
+    if negotiation_card and negotiation_card.get('level') in {'warning', 'danger'}:
+        alerts.append({
+            'id': 'price-negotiation',
+            'level': negotiation_card['level'],
+            'category': 'PRIX',
+            'title': 'Renégociation recommandée',
+            'message': negotiation_card['headline'],
+            'url': url_for('performances_fournisseurs') if has_request_context() else None,
+        })
+
     severity_order = {'danger': 0, 'warning': 1, 'info': 2, 'success': 3}
     alerts.sort(key=lambda item: (severity_order.get(item['level'], 9), item['category'], item['title']))
     counts = {
@@ -4345,6 +5675,8 @@ def get_dashboard_alerts(filters=None, context=None):
 
 def build_dashboard_email_body(context, alerts_payload):
     """Construit un email texte simple pour les abonnements dashboard."""
+    procurement_budget = context.get('procurement_budget') or {}
+    procurement_summary = context.get('procurement_summary') or {}
     lines = [
         'Rapport automatique du tableau de bord',
         '',
@@ -4354,6 +5686,18 @@ def build_dashboard_email_body(context, alerts_payload):
         f"CA net: {float(context['chiffre_affaires_net'] or 0):,.0f} FCFA",
         f"Encaissements: {float(context['total_encaisse'] or 0):,.0f} FCFA",
         f"Valeur du stock: {float(context['valeur_stock'] or 0):,.0f} FCFA",
+        (
+            f"Budget achats utilisé: {procurement_budget['usage_pct']:.1f}%"
+            if procurement_budget.get('usage_pct') is not None else
+            'Budget achats: non configuré'
+        ),
+        (
+            f"Meilleur rapport qualité/prix: {procurement_summary['best_value_supplier_name']}"
+            if procurement_summary.get('best_value_supplier_name') else
+            'Meilleur rapport qualité/prix: données insuffisantes'
+        ),
+        f"Prévision prochain mois: {float(context.get('forecast_next_spend') or 0):,.0f} FCFA",
+        f"Goulot principal: {context.get('process_bottleneck') or 'Non déterminé'}",
         '',
         'Alertes:',
     ]
@@ -5768,7 +7112,7 @@ def ajouter_mouvement_stock():
                 if produit_id in seen_products:
                     raise ValueError(f'Ligne {line_number}: le produit est dupliqué')
 
-                produit = Produit.query.get(int(produit_id))
+                produit = db.session.get(Produit, int(produit_id))
                 if not produit:
                     raise ValueError(f'Ligne {line_number}: produit introuvable')
 
@@ -6661,6 +8005,9 @@ def performances_fournisseurs():
         'performances/fournisseurs.html',
         stats=analytics['items'],
         summary=analytics['summary'],
+        best_value_supplier=analytics['best_value_supplier'],
+        negotiation_supplier=analytics['negotiation_supplier'],
+        late_supplier=analytics['late_supplier'],
         matrix_points=analytics['matrix_points'],
         evolution_labels=analytics['evolution_labels'],
         evolution_datasets=analytics['evolution_datasets'],
@@ -6752,6 +8099,8 @@ def performance_fournisseur_detail(id):
         respect_delai=supplier_stats['respect_delai'],
         price_competitiveness_pct=supplier_stats['price_competitiveness_pct'],
         score_fiabilite=supplier_stats['score_fiabilite'],
+        score_value=supplier_stats['score_value'],
+        supplier_insight=payload['supplier_insight'],
         filtres=filters,
         period_label=get_period_label(filters),
         filter_querystring=build_supplier_filter_querystring(filters),

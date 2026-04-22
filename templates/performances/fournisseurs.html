@@ -120,6 +120,68 @@
 </div>
 
 <div class="row mb-4">
+    <div class="col-lg-4 mb-3">
+        <div class="card shadow-sm h-100 border-success-subtle">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-stars text-success"></i> Classement Data Analyst</h5>
+            </div>
+            <div class="card-body">
+                {% if best_value_supplier %}
+                <div class="fw-semibold">{{ best_value_supplier.nom }} = meilleur rapport qualité/prix</div>
+                <div class="small text-muted mt-2">
+                    Score valeur {{ "{:,.2f}".format(best_value_supplier.score_value or 0) }}/5 •
+                    fiabilité {{ "{:,.1f}".format(best_value_supplier.score_fiabilite or 0) }}/100 •
+                    conformité {{ "{:,.1f}".format(best_value_supplier.taux_conformite or 0) }}%
+                </div>
+                <a href="{{ url_for('performance_fournisseur_detail', id=best_value_supplier.id) }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="btn btn-sm btn-outline-success mt-3">
+                    Voir le fournisseur
+                </a>
+                {% else %}
+                <div class="text-muted">Le scoring qualité/prix apparaîtra dès que les notes et références marché seront alimentées.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 mb-3">
+        <div class="card shadow-sm h-100 border-warning-subtle">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-cash-coin text-warning"></i> Négociation</h5>
+            </div>
+            <div class="card-body">
+                {% if negotiation_supplier %}
+                <div class="fw-semibold">
+                    {{ negotiation_supplier.nom }} à {{ "{:+.1f}".format(negotiation_supplier.price_competitiveness_pct or 0) }}% vs marché
+                </div>
+                <div class="small text-muted mt-2">
+                    Priorité de renégociation sur {{ "{:,.0f}".format(negotiation_supplier.total_montant or 0) }} FCFA d’achats.
+                </div>
+                {% else %}
+                <div class="text-muted">Aucune dérive prix majeure détectée sur les fournisseurs évalués.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 mb-3">
+        <div class="card shadow-sm h-100 border-danger-subtle">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-truck text-danger"></i> Suivi livraison</h5>
+            </div>
+            <div class="card-body">
+                {% if late_supplier and ((late_supplier.taux_retard or 0) > 0 or (late_supplier.delai_moyen or 0) > 0) %}
+                <div class="fw-semibold">{{ late_supplier.nom }} livre souvent en retard</div>
+                <div class="small text-muted mt-2">
+                    {{ "{:,.1f}".format(late_supplier.taux_retard or 0) }}% de retard • délai moyen
+                    {{ "{:,.1f}".format(late_supplier.delai_moyen or 0) }} j.
+                </div>
+                {% else %}
+                <div class="text-muted">Aucun fournisseur ne ressort comme retardataire sur la période filtrée.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
     <div class="col-lg-6 mb-3">
         <div class="card shadow-sm h-100">
             <div class="card-header bg-white">

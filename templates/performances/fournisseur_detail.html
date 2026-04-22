@@ -90,6 +90,11 @@
     </div>
 </div>
 
+<div class="alert {% if supplier_insight.level == 'danger' %}alert-danger{% elif supplier_insight.level == 'warning' %}alert-warning{% elif supplier_insight.level == 'success' %}alert-success{% elif supplier_insight.level == 'info' %}alert-info{% else %}alert-secondary{% endif %} mb-4">
+    <div class="fw-semibold">{{ supplier_insight.title }}</div>
+    <div>{{ supplier_insight.message }}</div>
+</div>
+
 <div class="row mb-4">
     <div class="col-lg-2 col-md-4 col-6 mb-3">
         <div class="card bg-primary text-white h-100">
@@ -134,8 +139,14 @@
     <div class="col-lg-2 col-md-4 col-6 mb-3">
         <div class="card shadow-sm h-100">
             <div class="card-body">
-                <h6>Fiabilité</h6>
-                <h2>{{ "{:,.1f}".format(score_fiabilite or 0) }}/100</h2>
+                <h6>Score valeur</h6>
+                <h2>
+                    {% if score_value is not none %}
+                    {{ "{:,.2f}".format(score_value or 0) }}/5
+                    {% else %}
+                    -
+                    {% endif %}
+                </h2>
             </div>
         </div>
     </div>
@@ -163,6 +174,14 @@
             <div class="card-body">
                 <small class="text-muted">Taux paiement</small>
                 <h4 class="mb-0 mt-2">{{ "{:,.1f}".format(taux_paiement or 0) }}%</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <small class="text-muted">Fiabilité</small>
+                <h4 class="mb-0 mt-2">{{ "{:,.1f}".format(score_fiabilite or 0) }}/100</h4>
             </div>
         </div>
     </div>

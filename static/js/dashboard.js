@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const alertsUrl = root.dataset.alertsUrl || '';
     const pollSeconds = Math.max(parseInt(root.dataset.pollSeconds || '30', 10), 10);
     const embedCode = root.dataset.embedCode || '';
+    const layoutStorageKey = 'afrilux-dashboard-layout';
     const sectionLinks = Array.from(document.querySelectorAll('[data-dashboard-section-link]'));
     const sections = sectionLinks
         .map((link) => document.querySelector(link.getAttribute('href')))
@@ -53,6 +54,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!section) return;
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
         setActiveSection(section.id);
+        if (window.history?.replaceState) {
+            window.history.replaceState(null, '', `#${section.id}`);
+        }
     }
 
     function nextSection(offset) {
@@ -60,6 +64,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const startIndex = activeIndex >= 0 ? activeIndex : 0;
         const targetIndex = Math.max(0, Math.min(sections.length - 1, startIndex + offset));
         scrollToSection(sections[targetIndex]);
+    }
+
+    function applyLayout(mode) {
+        const normalizedMode = mode === 'landscape' ? 'landscape' : 'portrait';
+        root.classList.toggle('dashboard-landscape', normalizedMode === 'landscape');
+        document.querySelectorAll('[data-dashboard-layout]').forEach((button) => {
+            button.classList.toggle('active', button.dataset.dashboardLayout === normalizedMode);
+        });
+        try {
+            window.localStorage.setItem(layoutStorageKey, normalizedMode);
+        } catch (error) {
+            console.debug('Dashboard layout preference could not be stored', error);
+        }
+        resizeCharts();
+    }
+
+    function isTypingTarget(target) {
+        if (!target) {
+            return false;
+        }
+        const tagName = target.tagName?.toLowerCase();
+        return tagName === 'input'
+            || tagName === 'textarea'
+            || tagName === 'select'
+            || target.isContentEditable;
     }
 
     async function registerServiceWorker() {
@@ -252,18 +281,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.querySelectorAll('[data-dashboard-layout]').forEach((button) => {
         button.addEventListener('click', () => {
-            const mode = button.dataset.dashboardLayout;
-            root.classList.toggle('dashboard-landscape', mode === 'landscape');
-            document.querySelectorAll('[data-dashboard-layout]').forEach((otherButton) => {
-                otherButton.classList.toggle('active', otherButton === button);
-            });
-            resizeCharts();
+            applyLayout(button.dataset.dashboardLayout);
         });
+    });
+
+    window.addEventListener('keydown', (event) => {
+        if (!event.altKey || isTypingTarget(event.target)) {
+            return;
+        }
+        if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            nextSection(1);
+        }
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            nextSection(-1);
+        }
     });
 
     if ('ResizeObserver' in window) {
         const resizeObserver = new ResizeObserver(() => resizeCharts());
         document.querySelectorAll('.dashboard-chart-shell').forEach((shell) => resizeObserver.observe(shell));
+    }
+
+    try {
+        applyLayout(window.localStorage.getItem(layoutStorageKey) || 'portrait');
+    } catch (error) {
+        applyLayout('portrait');
+    }
+
+    const initialHashSection = sections.find((section) => `#${section.id}` === window.location.hash);
+    if (initialHashSection) {
+        window.setTimeout(() => scrollToSection(initialHashSection), 120);
     }
 
     window.addEventListener('resize', resizeCharts);

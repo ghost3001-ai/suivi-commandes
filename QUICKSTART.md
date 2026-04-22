@@ -15,6 +15,12 @@ setup.bat
 
 **Voilà! L'app démarre automatiquement sur http://localhost:5000**
 
+Une fois connecté, ouvre `/dashboard` pour voir le cockpit `Data Analyst achats` :
+- historique des dépenses
+- alertes de dépassement budget
+- scoring et recommandation fournisseur
+- signaux de négociation, livraison, réception et facturation
+
 ---
 
 ## Si ça ne marche pas
@@ -64,6 +70,22 @@ En production hébergée, définis `ADMIN_PASSWORD` dans l'environnement avant l
 - [README.md](README.md) - Fonctionnalités complètes
 - [INSTALLATION.md](INSTALLATION.md) - Installation détaillée
 - [Déploiement Production](README.md#-déploiement-production)
+
+### Variables utiles pour les alertes achats
+
+```bash
+# Budget achats de la période analysée
+export DASHBOARD_PURCHASE_BUDGET=1000000
+
+# Déclenche l’alerte "budget déjà utilisé à 85%"
+export DASHBOARD_BUDGET_WARNING_PCT=85
+
+# Seuil de dérive prix vs marché
+export DASHBOARD_NEGOTIATION_ALERT_THRESHOLD=10
+
+# Seuil de dépendance fournisseur
+export DASHBOARD_SUPPLIER_DEPENDENCY_THRESHOLD=35
+```
 
 ---
 

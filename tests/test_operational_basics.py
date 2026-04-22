@@ -124,10 +124,21 @@ def test_stale_session_is_cleared_when_database_bootstraps(empty_app_module):
 
 def test_paginated_views_are_accessible_for_authenticated_admin(authenticated_client, app_module):
     seed_paginated_data(app_module)
+    app_module.app.config['DASHBOARD_PURCHASE_BUDGET'] = 50000
+    app_module.app.config['DASHBOARD_BUDGET_WARNING_PCT'] = 85
 
     response = authenticated_client.get('/dashboard')
     assert response.status_code == 200
-    assert 'Tableau de bord analytique' in response.get_data(as_text=True)
+    body = response.get_data(as_text=True)
+    assert 'Tableau de bord analytique' in body
+    assert 'Cockpit Data Analyst achats' in body
+    assert 'Analyse des dépenses (Spend Analysis)' in body
+    assert 'Prévisions & planification' in body
+    assert 'Risques & anomalies' in body
+    assert 'Optimisation du processus achats' in body
+    assert 'Aide à la décision stratégique' in body
+    assert 'Workflow achats piloté par la donnée' in body
+    assert 'Budget achats sous tension' in body
 
     response = authenticated_client.get('/stocks?page=2')
     assert response.status_code == 200
@@ -295,6 +306,7 @@ def test_supplier_performance_filters_and_exports(authenticated_client, app_modu
     body = response.get_data(as_text=True)
     assert 'Filtres fournisseurs' in body
     assert 'Vue active' in body
+    assert 'Classement Data Analyst' in body
 
     response = authenticated_client.get('/performances/fournisseurs/export/excel?period=month&include_inactive=1')
     assert response.status_code == 200
@@ -311,7 +323,9 @@ def test_supplier_performance_filters_and_exports(authenticated_client, app_modu
 
     response = authenticated_client.get(f'/performances/fournisseur/{fournisseur_id}?period=month')
     assert response.status_code == 200
-    assert 'Filtres période' in response.get_data(as_text=True)
+    body = response.get_data(as_text=True)
+    assert 'Filtres période' in body
+    assert 'Score valeur' in body
 
     response = authenticated_client.get(f'/performances/fournisseur/{fournisseur_id}/export/excel?period=month')
     assert response.status_code == 200
@@ -320,6 +334,65 @@ def test_supplier_performance_filters_and_exports(authenticated_client, app_modu
     response = authenticated_client.get(f'/performances/fournisseur/{fournisseur_id}/export/pdf?period=month')
     assert response.status_code == 200
     assert response.mimetype == 'application/pdf'
+
+def test_supplier_performance_page_highlights_best_value_supplier(authenticated_client, app_module):
+    with app_module.app.app_context():
+        db = app_module.db
+        supplier_a = app_module.Fournisseur(nom='Fournisseur A', pays='Cameroun', categorie='Test')
+        supplier_b = app_module.Fournisseur(nom='Fournisseur B', pays='France', categorie='Test')
+        db.session.add_all([supplier_a, supplier_b])
+        db.session.flush()
+
+        good_order = app_module.Commande(
+            nr=7001,
+            date_cde=date.today(),
+            entite='AFRILUX',
+            demandeur='Analyste',
+            acheteur='GILLES',
+            fournisseur_id=supplier_a.id,
+            affaire='Lot performant',
+            bon_commande='BC-ANA-001',
+            date_livraison=date.today(),
+            date_reception=date.today(),
+            montant=900,
+            avance=900,
+            solde=0,
+            statut=app_module.Commande.STATUT_PAYE,
+            prix_reference_marche=1000,
+            commande_conforme=True,
+            rupture_fournisseur=False,
+            note_fournisseur=4.8,
+            note_service=4.6,
+            date_paiement=date.today(),
+        )
+        risky_order = app_module.Commande(
+            nr=7002,
+            date_cde=date.today(),
+            entite='SMART',
+            demandeur='Analyste',
+            acheteur='ALAIN',
+            fournisseur_id=supplier_b.id,
+            affaire='Lot à négocier',
+            bon_commande='BC-ANA-002',
+            date_livraison=date.today() - timedelta(days=10),
+            montant=1500,
+            avance=200,
+            solde=1300,
+            statut=app_module.Commande.STATUT_A_PAYER,
+            prix_reference_marche=1000,
+            commande_conforme=False,
+            rupture_fournisseur=True,
+            note_fournisseur=2.5,
+            note_service=2.8,
+        )
+        db.session.add_all([good_order, risky_order])
+        db.session.commit()
+
+    response = authenticated_client.get('/performances/fournisseurs')
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'Fournisseur A = meilleur rapport qualité/prix' in body
+    assert 'Fournisseur B à +50.0% vs marché' in body
 
 
 def test_product_performance_page_exposes_catalog_categories(authenticated_client, app_module):
