@@ -33,6 +33,7 @@ from models import (
     LigneVente,
     MouvementStock,
     DashboardSubscription,
+    ReferenceOption,
 )
 from sqlalchemy import func, case, and_, or_, inspect, text, extract
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -77,6 +78,16 @@ ROLE_HOME_ENDPOINTS = {
 
 ENTITE_OPTIONS = ['AFRILUX', 'SMART']
 ACHETEUR_OPTIONS = ['GILLES', 'JISLAIN', 'ALAIN']
+REFERENCE_GROUP_ENTITES = 'commande_entite'
+REFERENCE_GROUP_ACHETEURS = 'commande_acheteur'
+REFERENCE_GROUP_SERVICES_DEMANDEURS = 'commande_service_demandeur'
+REFERENCE_GROUP_PRODUCT_FAMILIES = 'produit_famille'
+REFERENCE_GROUP_PRODUCT_SUBFAMILIES = 'produit_sous_famille'
+REFERENCE_GROUP_PRODUCT_CATEGORIES = 'produit_categorie'
+REFERENCE_GROUP_SUPPLIER_CATEGORIES = 'fournisseur_categorie'
+REFERENCE_GROUP_SALE_REGIONS = 'vente_region'
+REFERENCE_GROUP_SALE_CHANNELS = 'vente_canal'
+REFERENCE_GROUP_CUSTOMER_TYPES = 'vente_type_client'
 COMMANDE_LIST_VIEWS = OrderedDict([
     ('en_cours', 'Commandes en cours'),
     ('achevees', 'Commandes achevées'),
@@ -99,6 +110,18 @@ SERVICE_DEMANDEUR_OPTIONS = [
     'Finance & Comptabilité',
     'IT & SAV',
 ]
+
+DEFAULT_REFERENCE_OPTIONS = OrderedDict([
+    (REFERENCE_GROUP_ENTITES, ENTITE_OPTIONS),
+    (REFERENCE_GROUP_ACHETEURS, ACHETEUR_OPTIONS),
+    (REFERENCE_GROUP_SERVICES_DEMANDEURS, SERVICE_DEMANDEUR_OPTIONS),
+    (REFERENCE_GROUP_SALE_CHANNELS, [Vente.CANAL_OFFLINE, Vente.CANAL_ONLINE]),
+    (REFERENCE_GROUP_CUSTOMER_TYPES, [
+        Vente.TYPE_CLIENT_PARTICULIER,
+        Vente.TYPE_CLIENT_ENTREPRISE,
+        Vente.TYPE_CLIENT_REVENDEUR,
+    ]),
+])
 
 STOCK_TYPE_OPTIONS = OrderedDict([
     (Produit.TYPE_MATIERE_PREMIERE, 'Matières premières'),
@@ -123,6 +146,7 @@ ROLE_PERMISSIONS = {
     ROLE_ADMIN: {
         'dashboard_view',
         'dashboard_manage',
+        'system_admin',
         'commandes_view',
         'commandes_manage',
         'commandes_payment_manage',
@@ -166,6 +190,77 @@ ROLE_PERMISSIONS = {
         'performances_view',
     },
 }
+
+ADMIN_MODEL_REGISTRY = OrderedDict([
+    ('commandes', {
+        'label': 'Commandes',
+        'model': Commande,
+        'description': 'Commandes achats, paiement, réception et anomalies.',
+        'search': ['nr', 'bon_commande', 'facture', 'affaire', 'demandeur', 'acheteur'],
+    }),
+    ('fournisseurs', {
+        'label': 'Fournisseurs',
+        'model': Fournisseur,
+        'description': 'Référentiel fournisseurs et coordonnées.',
+        'search': ['nom', 'pays', 'ville', 'categorie', 'email1'],
+    }),
+    ('produits', {
+        'label': 'Produits',
+        'model': Produit,
+        'description': 'Catalogue produits, stock et règles de réapprovisionnement.',
+        'search': ['nom', 'code', 'famille', 'sous_famille', 'categorie'],
+    }),
+    ('referentiels', {
+        'label': 'Référentiels',
+        'model': ReferenceOption,
+        'description': 'Listes administrables: entités, acheteurs, services, familles, sous-familles, catégories.',
+        'search': ['groupe', 'cle', 'libelle', 'parent_groupe', 'parent_cle', 'commentaire'],
+    }),
+    ('ventes', {
+        'label': 'Ventes',
+        'model': Vente,
+        'description': 'Ventes client, paiement et retours.',
+        'search': ['reference', 'client_nom', 'client_telephone', 'region'],
+    }),
+    ('lignes-ventes', {
+        'label': 'Lignes de vente',
+        'model': LigneVente,
+        'description': 'Détail produit et prix des ventes.',
+        'search': [],
+    }),
+    ('commande-produits', {
+        'label': 'Produits commandés',
+        'model': CommandeProduit,
+        'description': 'Lignes produits rattachées aux commandes.',
+        'search': [],
+    }),
+    ('mouvements-stock', {
+        'label': 'Mouvements de stock',
+        'model': MouvementStock,
+        'description': 'Entrées, sorties et ajustements du stock.',
+        'search': ['type_mouvement', 'motif'],
+    }),
+    ('utilisateurs', {
+        'label': 'Utilisateurs',
+        'model': Utilisateur,
+        'description': 'Comptes, rôles et état des utilisateurs.',
+        'search': ['username', 'email', 'nom_complet', 'telephone', 'role'],
+        'readonly_fields': ['password_hash'],
+        'create_enabled': False,
+    }),
+    ('abonnements-dashboard', {
+        'label': 'Abonnements dashboard',
+        'model': DashboardSubscription,
+        'description': 'Rapports email automatiques du tableau de bord.',
+        'search': ['email', 'frequency'],
+    }),
+    ('logs', {
+        'label': 'Journal d’activité',
+        'model': LogAction,
+        'description': 'Audit des actions réalisées dans l’application.',
+        'search': ['action', 'table', 'details', 'ip_address'],
+    }),
+])
 
 # Initialisation des extensions
 db.init_app(app)
@@ -419,6 +514,274 @@ def require_permission(permission, default_endpoint=None):
         return None
     return redirect_access_denied(default_endpoint=default_endpoint)
 
+
+def slugify_reference_key(value):
+    text_value = unicodedata.normalize('NFKD', str(value or '').strip())
+    ascii_value = text_value.encode('ascii', 'ignore').decode('ascii').lower()
+    ascii_value = re.sub(r'[^a-z0-9]+', '_', ascii_value).strip('_')
+    return ascii_value or uuid4().hex
+
+
+def get_reference_options(group, default_options=None, parent_group=None, parent_key=None, include_existing=None):
+    options = []
+    seen = set()
+
+    def append_option(option):
+        label = (option or '').strip()
+        if label and label not in seen:
+            seen.add(label)
+            options.append(label)
+
+    default_options = default_options or []
+    for option in default_options:
+        append_option(option)
+
+    try:
+        query = ReferenceOption.query.filter_by(groupe=group, actif=True)
+        if parent_group is not None:
+            query = query.filter(ReferenceOption.parent_groupe == parent_group)
+        if parent_key is not None:
+            query = query.filter(ReferenceOption.parent_cle == parent_key)
+        for option in query.order_by(ReferenceOption.ordre.asc(), ReferenceOption.libelle.asc()).all():
+            append_option(option.libelle)
+    except Exception:
+        pass
+
+    for option in include_existing or []:
+        append_option(option)
+
+    return options
+
+
+def get_reference_key_for_label(group, label):
+    label = (label or '').strip()
+    if not label:
+        return None
+
+    option = ReferenceOption.query.filter_by(groupe=group, libelle=label).first()
+    return option.cle if option else slugify_reference_key(label)
+
+
+def seed_reference_options():
+    for group, labels in DEFAULT_REFERENCE_OPTIONS.items():
+        for index, label in enumerate(labels):
+            key = slugify_reference_key(label)
+            existing = ReferenceOption.query.filter_by(groupe=group, cle=key).first()
+            if existing:
+                continue
+            db.session.add(ReferenceOption(
+                groupe=group,
+                cle=key,
+                libelle=label,
+                ordre=index,
+                actif=True,
+                commentaire='Valeur initiale livrée avec l’application',
+            ))
+
+    db.session.commit()
+
+
+def get_commande_entite_options():
+    existing = [row[0] for row in db.session.query(Commande.entite).filter(Commande.entite.isnot(None), Commande.entite != '').distinct().all()]
+    return get_reference_options(REFERENCE_GROUP_ENTITES, ENTITE_OPTIONS, include_existing=existing)
+
+
+def get_commande_acheteur_options():
+    existing = [row[0] for row in db.session.query(Commande.acheteur).filter(Commande.acheteur.isnot(None), Commande.acheteur != '').distinct().all()]
+    return get_reference_options(REFERENCE_GROUP_ACHETEURS, ACHETEUR_OPTIONS, include_existing=existing)
+
+
+def get_service_demandeur_options():
+    existing = [row[0] for row in db.session.query(Commande.service_demandeur).filter(Commande.service_demandeur.isnot(None), Commande.service_demandeur != '').distinct().all()]
+    return get_reference_options(REFERENCE_GROUP_SERVICES_DEMANDEURS, SERVICE_DEMANDEUR_OPTIONS, include_existing=existing)
+
+
+def get_supplier_category_options():
+    existing = [row[0] for row in db.session.query(Fournisseur.categorie).filter(Fournisseur.categorie.isnot(None), Fournisseur.categorie != '').distinct().all()]
+    return get_reference_options(REFERENCE_GROUP_SUPPLIER_CATEGORIES, include_existing=existing)
+
+
+def get_admin_model_config(model_key):
+    return ADMIN_MODEL_REGISTRY.get(model_key)
+
+
+def get_admin_model_columns(model_key):
+    config = get_admin_model_config(model_key)
+    if not config:
+        return []
+
+    readonly_fields = set(config.get('readonly_fields', []))
+    return [
+        column for column in inspect(config['model']).columns
+        if column.name not in readonly_fields
+    ]
+
+
+def get_admin_model_display_columns(model_key):
+    columns = get_admin_model_columns(model_key)
+    preferred_names = ['id', 'nom', 'reference', 'nr', 'code', 'username', 'email', 'statut', 'created_at', 'updated_at']
+    selected = []
+
+    for name in preferred_names:
+        column = next((candidate for candidate in columns if candidate.name == name), None)
+        if column is not None and column not in selected:
+            selected.append(column)
+
+    for column in columns:
+        if column not in selected:
+            selected.append(column)
+        if len(selected) >= 8:
+            break
+
+    return selected
+
+
+def get_admin_column_type(column):
+    try:
+        python_type = column.type.python_type
+    except NotImplementedError:
+        return 'text'
+
+    if python_type is bool:
+        return 'boolean'
+    if python_type is int:
+        return 'integer'
+    if python_type is float:
+        return 'float'
+    if python_type is date:
+        return 'date'
+    if python_type is datetime:
+        return 'datetime'
+    return 'text'
+
+
+def get_admin_column_input_type(column):
+    field_type = get_admin_column_type(column)
+    if field_type in ['integer', 'float']:
+        return 'number'
+    if field_type == 'date':
+        return 'date'
+    if field_type == 'datetime':
+        return 'datetime-local'
+    return 'text'
+
+
+def get_admin_foreign_key_model(column):
+    if not column.foreign_keys:
+        return None
+
+    target_table = next(iter(column.foreign_keys)).column.table.name
+    for config in ADMIN_MODEL_REGISTRY.values():
+        model = config['model']
+        if getattr(model, '__tablename__', None) == target_table:
+            return model
+    return None
+
+
+def get_admin_foreign_key_options(column):
+    model = get_admin_foreign_key_model(column)
+    if model is None:
+        return []
+    return model.query.order_by(model.id.asc()).limit(500).all()
+
+
+def format_admin_value(value):
+    if value is None:
+        return ''
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%dT%H:%M')
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return '1' if value else ''
+    return str(value)
+
+
+def format_admin_display_value(value):
+    if value is None:
+        return '-'
+    if isinstance(value, datetime):
+        return value.strftime('%d/%m/%Y %H:%M')
+    if isinstance(value, date):
+        return value.strftime('%d/%m/%Y')
+    if isinstance(value, bool):
+        return 'Oui' if value else 'Non'
+    text_value = str(value)
+    return text_value if len(text_value) <= 120 else f'{text_value[:117]}...'
+
+
+def coerce_admin_field_value(column, raw_value, form_data):
+    field_type = get_admin_column_type(column)
+
+    if field_type == 'boolean':
+        return column.name in form_data
+
+    if raw_value in [None, '']:
+        if column.nullable or column.default is not None or column.server_default is not None:
+            return None
+        if field_type == 'integer':
+            return 0
+        if field_type == 'float':
+            return 0.0
+        return ''
+
+    if field_type == 'integer':
+        return int(raw_value)
+    if field_type == 'float':
+        return float(str(raw_value).replace(',', '.'))
+    if field_type == 'date':
+        return datetime.strptime(raw_value, '%Y-%m-%d').date()
+    if field_type == 'datetime':
+        normalized = raw_value[:-1] if raw_value.endswith('Z') else raw_value
+        return datetime.fromisoformat(normalized)
+    return raw_value.strip() if isinstance(raw_value, str) else raw_value
+
+
+def apply_admin_form_to_instance(model_key, instance):
+    for column in get_admin_model_columns(model_key):
+        if column.primary_key:
+            continue
+        raw_value = request.form.get(column.name)
+        setattr(instance, column.name, coerce_admin_field_value(column, raw_value, request.form))
+
+    if isinstance(instance, ReferenceOption):
+        instance.groupe = (instance.groupe or '').strip()
+        instance.libelle = (instance.libelle or '').strip()
+        if not instance.groupe:
+            raise ValueError('Le groupe du référentiel est obligatoire')
+        if not instance.libelle:
+            raise ValueError('Le libellé du référentiel est obligatoire')
+        instance.cle = (instance.cle or '').strip() or slugify_reference_key(instance.libelle)
+        instance.parent_groupe = (instance.parent_groupe or '').strip() or None
+        instance.parent_cle = (instance.parent_cle or '').strip() or None
+
+    if hasattr(instance, 'calculer_solde'):
+        instance.calculer_solde()
+    if hasattr(instance, 'calculer_montant'):
+        instance.calculer_montant()
+    if hasattr(instance, 'recalculer_totaux'):
+        instance.recalculer_totaux()
+
+
+def assert_admin_mutation_allowed(model_key, instance, action):
+    if model_key == 'utilisateurs':
+        target_role = normalize_user_role(getattr(instance, 'role', None))
+        is_current_user = getattr(instance, 'id', None) == getattr(current_user, 'id', None)
+        admin_count = Utilisateur.query.filter_by(role=ROLE_ADMIN).count()
+
+        if action == 'delete' and is_current_user:
+            raise ValueError('Vous ne pouvez pas supprimer votre propre compte administrateur')
+        if action == 'delete' and target_role == ROLE_ADMIN and admin_count <= 1:
+            raise ValueError('Vous ne pouvez pas supprimer le dernier administrateur')
+        if action == 'update' and is_current_user:
+            submitted_role = normalize_user_role(request.form.get('role'))
+            submitted_active = 'actif' in request.form
+            if admin_count <= 1 and submitted_role != ROLE_ADMIN:
+                raise ValueError('Vous ne pouvez pas retirer le rôle du dernier administrateur')
+            if admin_count <= 1 and not submitted_active:
+                raise ValueError('Vous ne pouvez pas désactiver le dernier administrateur')
+
+
 # ==================== CONTEXT PROCESSORS ====================
 
 @app.context_processor
@@ -451,6 +814,10 @@ def utility_processor():
         can=can,
         can_edit_commande=can_edit_commande,
         role_label=lambda role: get_role_label(role),
+        admin_display_value=format_admin_display_value,
+        admin_form_value=format_admin_value,
+        admin_column_input_type=get_admin_column_input_type,
+        admin_foreign_key_options=get_admin_foreign_key_options,
     )
 
 # ==================== VALIDATION FUNCTIONS ====================
@@ -581,7 +948,7 @@ def valider_service_demandeur(valeur):
     service = (valeur or '').strip()
     if not service:
         return None
-    if service not in SERVICE_DEMANDEUR_OPTIONS:
+    if service not in get_service_demandeur_options():
         raise ValueError('Service demandeur invalide')
     return service
 
@@ -709,10 +1076,88 @@ def get_commande_form_values(commande=None, form_data=None):
 
 def get_product_category_catalog():
     """Retourne le référentiel familles/catégories des produits."""
-    return get_category_catalog(
+    catalog = get_category_catalog(
         app.config.get('CATEGORY_CATALOG_FILE'),
         app.config.get('CATEGORY_FAMILY_OVERRIDE_FILE'),
     )
+    families = list(catalog.get('families', []))
+    categories_by_family = {
+        family: list(categories)
+        for family, categories in catalog.get('categories_by_family', {}).items()
+    }
+    subfamilies_by_category = {
+        category: list(subfamilies)
+        for category, subfamilies in catalog.get('subcategories_by_category', {}).items()
+    }
+    category_to_family = dict(catalog.get('category_to_family', {}))
+
+    def add_unique(values, value):
+        if value and value not in values:
+            values.append(value)
+
+    try:
+        existing_families = [
+            row[0] for row in db.session.query(Produit.famille)
+            .filter(Produit.famille.isnot(None), Produit.famille != '')
+            .distinct().all()
+        ]
+        db_families = get_reference_options(REFERENCE_GROUP_PRODUCT_FAMILIES, include_existing=existing_families)
+        for family in db_families:
+            add_unique(families, family)
+            categories_by_family.setdefault(family, [])
+
+        existing_categories = db.session.query(Produit.famille, Produit.categorie)\
+            .filter(Produit.categorie.isnot(None), Produit.categorie != '')\
+            .distinct().all()
+        db_categories = ReferenceOption.query.filter_by(groupe=REFERENCE_GROUP_PRODUCT_CATEGORIES, actif=True)\
+            .order_by(ReferenceOption.ordre.asc(), ReferenceOption.libelle.asc()).all()
+        for option in db_categories:
+            family = option.parent_cle or option.parent_groupe
+            if family:
+                add_unique(families, family)
+                categories_by_family.setdefault(family, [])
+                add_unique(categories_by_family[family], option.libelle)
+                category_to_family[option.libelle] = family
+            else:
+                categories_by_family.setdefault('', [])
+                add_unique(categories_by_family[''], option.libelle)
+
+        for family, category in existing_categories:
+            if family:
+                add_unique(families, family)
+                categories_by_family.setdefault(family, [])
+                add_unique(categories_by_family[family], category)
+                category_to_family.setdefault(category, family)
+            else:
+                categories_by_family.setdefault('', [])
+                add_unique(categories_by_family[''], category)
+
+        existing_subfamilies = db.session.query(Produit.categorie, Produit.sous_famille)\
+            .filter(Produit.sous_famille.isnot(None), Produit.sous_famille != '')\
+            .distinct().all()
+        db_subfamilies = ReferenceOption.query.filter_by(groupe=REFERENCE_GROUP_PRODUCT_SUBFAMILIES, actif=True)\
+            .order_by(ReferenceOption.ordre.asc(), ReferenceOption.libelle.asc()).all()
+        for option in db_subfamilies:
+            parent_category = option.parent_cle or option.parent_groupe or ''
+            subfamilies_by_category.setdefault(parent_category, [])
+            add_unique(subfamilies_by_category[parent_category], option.libelle)
+
+        for category, subfamily in existing_subfamilies:
+            parent_category = category or ''
+            subfamilies_by_category.setdefault(parent_category, [])
+            add_unique(subfamilies_by_category[parent_category], subfamily)
+    except Exception:
+        pass
+
+    catalog['families'] = families
+    catalog['categories_by_family'] = categories_by_family
+    catalog['subcategories_by_category'] = subfamilies_by_category
+    catalog['family_lookup'] = set(families)
+    catalog['category_lookup'] = set(category_to_family.keys()) | {
+        category for categories in categories_by_family.values() for category in categories
+    }
+    catalog['category_to_family'] = category_to_family
+    return catalog
 
 
 def get_product_form_values(produit=None, form_data=None):
@@ -723,6 +1168,7 @@ def get_product_form_values(produit=None, form_data=None):
             'code': (form_data.get('code') or '').strip(),
             'description': (form_data.get('description') or '').strip(),
             'famille': (form_data.get('famille') or '').strip(),
+            'sous_famille': (form_data.get('sous_famille') or '').strip(),
             'categorie': (form_data.get('categorie') or '').strip(),
             'type_stock': (form_data.get('type_stock') or Produit.TYPE_PRODUIT_FINI).strip(),
             'methode_reappro': (form_data.get('methode_reappro') or Produit.REAPPRO_POINT_COMMANDE).strip(),
@@ -747,6 +1193,7 @@ def get_product_form_values(produit=None, form_data=None):
             'code': produit.code or '',
             'description': produit.description or '',
             'famille': produit.famille or '',
+            'sous_famille': produit.sous_famille or '',
             'categorie': produit.categorie or '',
             'type_stock': produit.type_stock or Produit.TYPE_PRODUIT_FINI,
             'methode_reappro': produit.methode_reappro or Produit.REAPPRO_POINT_COMMANDE,
@@ -769,6 +1216,7 @@ def get_product_form_values(produit=None, form_data=None):
         'code': '',
         'description': '',
         'famille': '',
+        'sous_famille': '',
         'categorie': '',
         'type_stock': Produit.TYPE_PRODUIT_FINI,
         'methode_reappro': Produit.REAPPRO_POINT_COMMANDE,
@@ -792,6 +1240,7 @@ def get_product_catalog_context(form_values):
     catalog = get_product_category_catalog()
     family_label = form_values.get('famille') or ''
     category_label = form_values.get('categorie') or ''
+    subfamily_label = form_values.get('sous_famille') or ''
 
     if family_label:
         available_categories = list(catalog['categories_by_family'].get(family_label, []))
@@ -807,20 +1256,27 @@ def get_product_catalog_context(form_values):
     if category_label and category_label not in available_categories:
         available_categories.append(category_label)
 
+    available_subfamilies = list(catalog.get('subcategories_by_category', {}).get(category_label, []))
+    if subfamily_label and subfamily_label not in available_subfamilies:
+        available_subfamilies.append(subfamily_label)
+
     return {
         'catalog_ui': {
             'families': catalog['families'],
             'categories_by_family': catalog['categories_by_family'],
+            'subfamilies_by_category': catalog.get('subcategories_by_category', {}),
         },
         'available_categories': available_categories,
+        'available_subfamilies': available_subfamilies,
     }
 
 
-def normalize_product_taxonomy(famille, categorie, sous_categorie=None):
-    """Valide la cohérence famille/catégorie."""
+def normalize_product_taxonomy(famille, categorie, sous_famille=None):
+    """Valide la cohérence famille/catégorie/sous-famille."""
     catalog = get_product_category_catalog()
     famille = (famille or '').strip() or None
     categorie = (categorie or '').strip() or None
+    sous_famille = (sous_famille or '').strip() or None
 
     if famille and catalog['family_lookup'] and famille not in catalog['family_lookup']:
         raise ValueError('Famille invalide')
@@ -834,7 +1290,12 @@ def normalize_product_taxonomy(famille, categorie, sous_categorie=None):
                 raise ValueError('La catégorie sélectionnée ne correspond pas à la famille choisie')
             famille = mapped_family
 
-    return famille, categorie, None
+    if sous_famille and categorie:
+        known_subfamilies = catalog.get('subcategories_by_category', {}).get(categorie, [])
+        if known_subfamilies and sous_famille not in known_subfamilies:
+            raise ValueError('La sous-famille sélectionnée ne correspond pas à la catégorie choisie')
+
+    return famille, categorie, sous_famille
 
 
 def sync_existing_product_taxonomy():
@@ -1695,9 +2156,10 @@ def validate_stock_preview_row(row, validator_context=None):
 
     famille = get_import_text_value(row.get('Famille')) or None
     categorie = get_import_text_value(row.get('Catégorie')) or None
-    if famille or categorie:
+    sous_famille = get_import_text_value(row.get('Sous-famille')) or None
+    if famille or categorie or sous_famille:
         try:
-            normalize_product_taxonomy(famille, categorie)
+            normalize_product_taxonomy(famille, categorie, sous_famille)
         except ValueError as exc:
             issues.append(make_preview_issue('Catégorie', str(exc), 'Corriger la famille ou la catégorie'))
 
@@ -2242,7 +2704,8 @@ def import_stock_dataframe(dataframe):
 
             famille = str(row.get('Famille')).strip() if pd.notna(row.get('Famille')) and str(row.get('Famille')).strip() else None
             categorie = str(row.get('Catégorie')).strip() if pd.notna(row.get('Catégorie')) and str(row.get('Catégorie')).strip() else None
-            famille, categorie, _ = normalize_product_taxonomy(famille, categorie)
+            sous_famille = str(row.get('Sous-famille')).strip() if pd.notna(row.get('Sous-famille')) and str(row.get('Sous-famille')).strip() else None
+            famille, categorie, sous_famille = normalize_product_taxonomy(famille, categorie, sous_famille)
 
             stock_actuel = parser_montant_import(row.get('Stock actuel'))
             if stock_actuel < 0:
@@ -2292,6 +2755,8 @@ def import_stock_dataframe(dataframe):
                 produit.famille = famille
             if categorie is not None:
                 produit.categorie = categorie
+            if sous_famille is not None:
+                produit.sous_famille = sous_famille
             if unite is not None:
                 produit.unite = unite
             if prix_unitaire is not None:
@@ -4927,6 +5392,7 @@ def build_dashboard_excel_bytes(filters, context=None):
         'Produit': produit.nom,
         'Famille': produit.famille,
         'Catégorie': produit.categorie,
+        'Sous-famille': produit.sous_famille,
         'Quantité': ligne.quantite,
         'Prix unitaire': ligne.prix_unitaire,
         'Montant total': ligne.montant_total,
@@ -4940,6 +5406,7 @@ def build_dashboard_excel_bytes(filters, context=None):
         'Code': produit.code,
         'Famille': produit.famille,
         'Catégorie': produit.categorie,
+        'Sous-famille': produit.sous_famille,
         'Prix unitaire': produit.prix_unitaire,
         'Stock actuel': produit.stock_actuel,
         'Stock minimum': produit.stock_minimum,
@@ -6138,6 +6605,9 @@ def ajouter_commande():
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
     commande_capabilities = get_commande_edit_capabilities()
     form_values = get_commande_form_values(form_data=request.form if request.method == 'POST' else None)
+    entite_options = get_commande_entite_options()
+    acheteur_options = get_commande_acheteur_options()
+    services_demandeur = get_service_demandeur_options()
     
     if request.method == 'POST':
         try:
@@ -6176,10 +6646,10 @@ def ajouter_commande():
             commande = Commande(
                 nr=parse_commande_numero(request.form.get('nr')),
                 date_cde=parse_commande_date_input(request.form.get('date_cde'), 'Date commande', obligatoire=True),
-                entite=valider_choix_liste(request.form.get('entite'), ENTITE_OPTIONS, 'Entité', obligatoire=True),
+                entite=valider_choix_liste(request.form.get('entite'), entite_options, 'Entité', obligatoire=True),
                 demandeur=valider_texte_requis(request.form.get('demandeur'), 'Demandeur'),
                 service_demandeur=service_demandeur,
-                acheteur=valider_choix_liste(request.form.get('acheteur'), ACHETEUR_OPTIONS, 'Acheteur', obligatoire=True),
+                acheteur=valider_choix_liste(request.form.get('acheteur'), acheteur_options, 'Acheteur', obligatoire=True),
                 fournisseur_id=parse_commande_fournisseur_id(request.form.get('fournisseur_id'), obligatoire=True),
                 affaire=valider_texte_requis(request.form.get('affaire'), 'Affaire / Description'),
                 bon_commande=valider_texte_requis(request.form.get('bon_commande'), 'N° Bon commande'),
@@ -6224,9 +6694,9 @@ def ajouter_commande():
                          commande=None,
                          form_values=form_values,
                          commande_capabilities=commande_capabilities,
-                         entite_options=ENTITE_OPTIONS,
-                         acheteur_options=ACHETEUR_OPTIONS,
-                         services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
+                         entite_options=entite_options,
+                         acheteur_options=acheteur_options,
+                         services_demandeur=services_demandeur,
                          titre="Ajouter une commande")
 
 @app.route('/commande/modifier/<int:id>', methods=['GET', 'POST'])
@@ -6240,6 +6710,9 @@ def modifier_commande(id):
     commande = Commande.query.get_or_404(id)
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
     form_values = get_commande_form_values(commande, request.form if request.method == 'POST' else None)
+    entite_options = get_commande_entite_options()
+    acheteur_options = get_commande_acheteur_options()
+    services_demandeur = get_service_demandeur_options()
     
     if request.method == 'POST':
         try:
@@ -6257,10 +6730,10 @@ def modifier_commande(id):
                 updated_values.update({
                     'nr': parse_commande_numero(request.form.get('nr')),
                     'date_cde': parse_commande_date_input(request.form.get('date_cde'), 'Date commande', obligatoire=True),
-                    'entite': valider_choix_liste(request.form.get('entite'), ENTITE_OPTIONS, 'Entité', obligatoire=True),
+                    'entite': valider_choix_liste(request.form.get('entite'), entite_options, 'Entité', obligatoire=True),
                     'demandeur': valider_texte_requis(request.form.get('demandeur'), 'Demandeur'),
                     'service_demandeur': service_demandeur,
-                    'acheteur': valider_choix_liste(request.form.get('acheteur'), ACHETEUR_OPTIONS, 'Acheteur', obligatoire=True),
+                    'acheteur': valider_choix_liste(request.form.get('acheteur'), acheteur_options, 'Acheteur', obligatoire=True),
                     'fournisseur_id': parse_commande_fournisseur_id(request.form.get('fournisseur_id'), obligatoire=True),
                     'affaire': valider_texte_requis(request.form.get('affaire'), 'Affaire / Description'),
                     'bon_commande': valider_texte_requis(request.form.get('bon_commande'), 'N° Bon commande'),
@@ -6344,9 +6817,9 @@ def modifier_commande(id):
                          form_values=form_values,
                          fournisseurs=fournisseurs,
                          commande_capabilities=commande_capabilities,
-                         entite_options=ENTITE_OPTIONS,
-                         acheteur_options=ACHETEUR_OPTIONS,
-                         services_demandeur=SERVICE_DEMANDEUR_OPTIONS,
+                         entite_options=entite_options,
+                         acheteur_options=acheteur_options,
+                         services_demandeur=services_demandeur,
                          titre="Modifier la commande")
 
 @app.route('/commande/supprimer/<int:id>', methods=['POST'])
@@ -6457,7 +6930,12 @@ def ajouter_fournisseur():
             db.session.rollback()
             flash(f'Erreur lors de l\'ajout: {str(e)}', 'danger')
     
-    return render_template('admin/fournisseur_form.html', fournisseur=None, titre="Ajouter un fournisseur")
+    return render_template(
+        'admin/fournisseur_form.html',
+        fournisseur=None,
+        categorie_options=get_supplier_category_options(),
+        titre="Ajouter un fournisseur",
+    )
 
 @app.route('/fournisseur/modifier/<int:id>', methods=['GET', 'POST'])
 @login_required
@@ -6507,7 +6985,12 @@ def modifier_fournisseur(id):
             db.session.rollback()
             flash(f'Erreur lors de la modification: {str(e)}', 'danger')
     
-    return render_template('admin/fournisseur_form.html', fournisseur=fournisseur, titre="Modifier le fournisseur")
+    return render_template(
+        'admin/fournisseur_form.html',
+        fournisseur=fournisseur,
+        categorie_options=get_supplier_category_options(),
+        titre="Modifier le fournisseur",
+    )
 
 @app.route('/fournisseur/supprimer/<int:id>', methods=['POST'])
 @login_required
@@ -6751,6 +7234,7 @@ def ajouter_produit():
             'code': request.form.get('code'),
             'description': request.form.get('description'),
             'famille': request.form.get('famille'),
+            'sous_famille': request.form.get('sous_famille'),
             'categorie': request.form.get('categorie'),
             'type_stock': request.form.get('type_stock'),
             'methode_reappro': request.form.get('methode_reappro'),
@@ -6771,9 +7255,10 @@ def ajouter_produit():
             nom = form_values['nom']
             code = form_values['code'] or None
             description = form_values['description'] or None
-            famille, categorie, _ = normalize_product_taxonomy(
+            famille, categorie, sous_famille = normalize_product_taxonomy(
                 form_values['famille'],
                 form_values['categorie'],
+                form_values['sous_famille'],
             )
             type_stock = valider_choix_liste(
                 form_values['type_stock'],
@@ -6819,6 +7304,7 @@ def ajouter_produit():
                 code=code,
                 description=description,
                 famille=famille,
+                sous_famille=sous_famille,
                 categorie=categorie,
                 type_stock=type_stock,
                 methode_reappro=methode_reappro,
@@ -6894,6 +7380,7 @@ def modifier_produit(id):
             'code': request.form.get('code'),
             'description': request.form.get('description'),
             'famille': request.form.get('famille'),
+            'sous_famille': request.form.get('sous_famille'),
             'categorie': request.form.get('categorie'),
             'type_stock': request.form.get('type_stock'),
             'methode_reappro': request.form.get('methode_reappro'),
@@ -6955,9 +7442,10 @@ def modifier_produit(id):
             produit.nom = nom
             produit.code = code
             produit.description = form_values['description'] or None
-            produit.famille, produit.categorie, _ = normalize_product_taxonomy(
+            produit.famille, produit.categorie, produit.sous_famille = normalize_product_taxonomy(
                 form_values['famille'],
                 form_values['categorie'],
+                form_values['sous_famille'],
             )
             produit.type_stock = type_stock
             produit.methode_reappro = methode_reappro
@@ -7644,6 +8132,7 @@ def migrate_existing_schema():
             'code': 'VARCHAR(50)',
             'description': 'TEXT',
             'famille': 'VARCHAR(150)',
+            'sous_famille': 'VARCHAR(150)',
             'categorie': 'VARCHAR(100)',
             'type_stock': 'VARCHAR(30)',
             'methode_reappro': 'VARCHAR(30)',
@@ -7689,6 +8178,7 @@ def migrate_existing_schema():
         "CREATE INDEX IF NOT EXISTS idx_fournisseurs_categorie ON fournisseurs (categorie)",
         "CREATE INDEX IF NOT EXISTS idx_produits_nom ON produits (nom)",
         "CREATE INDEX IF NOT EXISTS idx_produits_famille ON produits (famille)",
+        "CREATE INDEX IF NOT EXISTS idx_produits_sous_famille ON produits (sous_famille)",
         "CREATE INDEX IF NOT EXISTS idx_produits_categorie ON produits (categorie)",
         "CREATE INDEX IF NOT EXISTS idx_produits_type_stock ON produits (type_stock)",
         "CREATE INDEX IF NOT EXISTS idx_produits_methode_reappro ON produits (methode_reappro)",
@@ -7709,6 +8199,9 @@ def migrate_existing_schema():
         "CREATE INDEX IF NOT EXISTS idx_logs_action ON logs (action)",
         'CREATE INDEX IF NOT EXISTS idx_logs_table ON logs ("table")',
         "CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs (created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_reference_options_groupe ON reference_options (groupe)",
+        "CREATE INDEX IF NOT EXISTS idx_reference_options_libelle ON reference_options (libelle)",
+        "CREATE INDEX IF NOT EXISTS idx_reference_options_parent ON reference_options (parent_groupe, parent_cle)",
     ]
 
     with db.engine.begin() as connection:
@@ -7797,6 +8290,7 @@ def init_db():
     with app.app_context():
         db.create_all()
         migrate_existing_schema()
+        seed_reference_options()
         sync_existing_product_taxonomy()
 
         is_production = bool(app.config.get('IS_PRODUCTION'))
@@ -8687,6 +9181,187 @@ def admin_logs():
                          tables=[t[0] for t in tables if t[0]],
                          utilisateurs=utilisateurs,
                          pagination=logs_pagination)
+
+
+# ==================== ADMIN AVANCÉ TYPE DJANGO ====================
+
+@app.route('/admin/system')
+@login_required
+def admin_system_index():
+    denied_response = require_permission('system_admin')
+    if denied_response:
+        return denied_response
+
+    model_cards = []
+    for model_key, config in ADMIN_MODEL_REGISTRY.items():
+        model = config['model']
+        model_cards.append({
+            'key': model_key,
+            'label': config['label'],
+            'description': config['description'],
+            'count': model.query.count(),
+        })
+
+    return render_template('admin/system_index.html', model_cards=model_cards)
+
+
+@app.route('/admin/system/<model_key>')
+@login_required
+def admin_system_model_list(model_key):
+    denied_response = require_permission('system_admin')
+    if denied_response:
+        return denied_response
+
+    config = get_admin_model_config(model_key)
+    if not config:
+        flash('Modèle administrable introuvable', 'danger')
+        return redirect(url_for('admin_system_index'))
+
+    model = config['model']
+    page = get_requested_page()
+    search = request.args.get('q', '').strip()
+    query = model.query
+
+    if search and config.get('search'):
+        filters = []
+        for field_name in config['search']:
+            column = getattr(model, field_name, None)
+            if column is not None:
+                filters.append(column.cast(db.String).ilike(f'%{search}%'))
+        if filters:
+            query = query.filter(or_(*filters))
+
+    order_column = getattr(model, 'updated_at', None)
+    if order_column is None:
+        order_column = getattr(model, 'created_at', None)
+    if order_column is None:
+        order_column = getattr(model, 'id')
+    pagination = query.order_by(order_column.desc()).paginate(
+        page=page,
+        per_page=30,
+        error_out=False,
+    )
+
+    return render_template(
+        'admin/system_model.html',
+        model_key=model_key,
+        config=config,
+        columns=get_admin_model_display_columns(model_key),
+        rows=pagination.items,
+        pagination=pagination,
+        search=search,
+        action='list',
+    )
+
+
+@app.route('/admin/system/<model_key>/ajouter', methods=['GET', 'POST'])
+@login_required
+def admin_system_model_create(model_key):
+    denied_response = require_permission('system_admin')
+    if denied_response:
+        return denied_response
+
+    config = get_admin_model_config(model_key)
+    if not config:
+        flash('Modèle administrable introuvable', 'danger')
+        return redirect(url_for('admin_system_index'))
+
+    model = config['model']
+    instance = model()
+
+    if config.get('create_enabled') is False:
+        flash(f'La création directe est désactivée pour {config["label"]}. Utilisez l’écran métier dédié.', 'warning')
+        return redirect(url_for('admin_system_model_list', model_key=model_key))
+
+    if request.method == 'POST':
+        try:
+            apply_admin_form_to_instance(model_key, instance)
+            assert_admin_mutation_allowed(model_key, instance, 'create')
+            db.session.add(instance)
+            db.session.flush()
+            enregistrer_log('CREATE', getattr(model, '__tablename__', model_key), instance.id, f'Création depuis admin avancé: {config["label"]}')
+            db.session.commit()
+            flash(f'{config["label"]}: enregistrement créé', 'success')
+            return redirect(url_for('admin_system_model_list', model_key=model_key))
+        except (ValueError, IntegrityError) as e:
+            db.session.rollback()
+            flash(f'Erreur: {str(e)}', 'danger')
+
+    return render_template(
+        'admin/system_model.html',
+        model_key=model_key,
+        config=config,
+        columns=get_admin_model_columns(model_key),
+        row=instance,
+        action='form',
+        form_title=f'Créer - {config["label"]}',
+    )
+
+
+@app.route('/admin/system/<model_key>/<int:record_id>/modifier', methods=['GET', 'POST'])
+@login_required
+def admin_system_model_edit(model_key, record_id):
+    denied_response = require_permission('system_admin')
+    if denied_response:
+        return denied_response
+
+    config = get_admin_model_config(model_key)
+    if not config:
+        flash('Modèle administrable introuvable', 'danger')
+        return redirect(url_for('admin_system_index'))
+
+    model = config['model']
+    instance = model.query.get_or_404(record_id)
+
+    if request.method == 'POST':
+        try:
+            assert_admin_mutation_allowed(model_key, instance, 'update')
+            apply_admin_form_to_instance(model_key, instance)
+            enregistrer_log('UPDATE', getattr(model, '__tablename__', model_key), instance.id, f'Modification depuis admin avancé: {config["label"]}')
+            db.session.commit()
+            flash(f'{config["label"]}: enregistrement modifié', 'success')
+            return redirect(url_for('admin_system_model_list', model_key=model_key))
+        except (ValueError, IntegrityError) as e:
+            db.session.rollback()
+            flash(f'Erreur: {str(e)}', 'danger')
+
+    return render_template(
+        'admin/system_model.html',
+        model_key=model_key,
+        config=config,
+        columns=get_admin_model_columns(model_key),
+        row=instance,
+        action='form',
+        form_title=f'Modifier - {config["label"]} #{record_id}',
+    )
+
+
+@app.route('/admin/system/<model_key>/<int:record_id>/supprimer', methods=['POST'])
+@login_required
+def admin_system_model_delete(model_key, record_id):
+    denied_response = require_permission('system_admin')
+    if denied_response:
+        return denied_response
+
+    config = get_admin_model_config(model_key)
+    if not config:
+        flash('Modèle administrable introuvable', 'danger')
+        return redirect(url_for('admin_system_index'))
+
+    model = config['model']
+    instance = model.query.get_or_404(record_id)
+
+    try:
+        assert_admin_mutation_allowed(model_key, instance, 'delete')
+        enregistrer_log('DELETE', getattr(model, '__tablename__', model_key), record_id, f'Suppression depuis admin avancé: {config["label"]}')
+        db.session.delete(instance)
+        db.session.commit()
+        flash(f'{config["label"]}: enregistrement supprimé', 'success')
+    except (ValueError, IntegrityError) as e:
+        db.session.rollback()
+        flash(f'Erreur: {str(e)}', 'danger')
+
+    return redirect(url_for('admin_system_model_list', model_key=model_key))
 
 
 if __name__ == '__main__':

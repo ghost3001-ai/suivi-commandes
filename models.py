@@ -187,6 +187,30 @@ class LogAction(db.Model):
         return f'<Log {self.action} - {self.created_at}>'
 
 
+class ReferenceOption(db.Model):
+    """Référentiels modifiables par l'administrateur."""
+    __tablename__ = 'reference_options'
+
+    id = db.Column(db.Integer, primary_key=True)
+    groupe = db.Column(db.String(80), nullable=False, index=True)
+    cle = db.Column(db.String(160), nullable=False, index=True)
+    libelle = db.Column(db.String(220), nullable=False, index=True)
+    parent_groupe = db.Column(db.String(80), index=True)
+    parent_cle = db.Column(db.String(160), index=True)
+    ordre = db.Column(db.Integer, default=0, index=True)
+    actif = db.Column(db.Boolean, default=True, index=True)
+    commentaire = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('groupe', 'cle', name='uq_reference_options_groupe_cle'),
+    )
+
+    def __repr__(self):
+        return f'<ReferenceOption {self.groupe}:{self.libelle}>'
+
+
 class Produit(db.Model):
     """Modèle pour les produits/équipements"""
     __tablename__ = 'produits'
@@ -209,6 +233,7 @@ class Produit(db.Model):
     code = db.Column(db.String(50), unique=True)
     description = db.Column(db.Text)
     famille = db.Column(db.String(150), index=True)
+    sous_famille = db.Column(db.String(150), index=True)
     categorie = db.Column(db.String(100), index=True)
     type_stock = db.Column(db.String(30), default=TYPE_PRODUIT_FINI, index=True)
     methode_reappro = db.Column(db.String(30), default=REAPPRO_POINT_COMMANDE, index=True)

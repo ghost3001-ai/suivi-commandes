@@ -237,6 +237,9 @@
                             {% if can('users_manage') %}
                             <li><a class="dropdown-item {% if request.endpoint and request.endpoint.startswith('admin_utilisateurs') %}active{% endif %}" href="{{ url_for('admin_utilisateurs') }}"><i class="bi bi-people me-2"></i>Utilisateurs</a></li>
                             {% endif %}
+                            {% if can('system_admin') %}
+                            <li><a class="dropdown-item {% if request.endpoint and request.endpoint.startswith('admin_system') %}active{% endif %}" href="{{ url_for('admin_system_index') }}"><i class="bi bi-sliders2-vertical me-2"></i>Admin avancé</a></li>
+                            {% endif %}
                             {% if can('logs_view') %}
                             <li><a class="dropdown-item {% if request.endpoint == 'admin_logs' %}active{% endif %}" href="{{ url_for('admin_logs') }}"><i class="bi bi-journal-bookmark-fill me-2"></i>Logs</a></li>
                             {% endif %}

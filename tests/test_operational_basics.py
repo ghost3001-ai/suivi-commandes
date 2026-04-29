@@ -158,6 +158,79 @@ def test_paginated_views_are_accessible_for_authenticated_admin(authenticated_cl
     assert 'Précédent' in response.get_data(as_text=True)
 
 
+def test_advanced_admin_is_available_only_to_admins(authenticated_client, app_module):
+    seed_paginated_data(app_module)
+
+    response = authenticated_client.get('/admin/system')
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'Admin avancé' in body
+    assert 'Commandes' in body
+    assert 'Produits' in body
+
+    response = authenticated_client.get('/admin/system/produits')
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'Produit 000' in body
+    assert 'Ajouter' in body
+
+    spectator_client = build_role_client(app_module, 'spectateur', 'spectateur_admin_blocked')
+    response = spectator_client.get('/admin/system', follow_redirects=False)
+    assert response.status_code == 302
+    assert '/dashboard' in response.headers['Location']
+
+
+def test_reference_options_feed_business_forms(authenticated_client, app_module):
+    response = authenticated_client.post('/admin/system/referentiels/ajouter', data={
+        'groupe': 'commande_acheteur',
+        'cle': '',
+        'libelle': 'ACHETEUR LIBRE',
+        'ordre': '10',
+        'actif': 'on',
+    }, follow_redirects=False)
+    assert response.status_code == 302
+
+    response = authenticated_client.post('/admin/system/referentiels/ajouter', data={
+        'groupe': 'produit_famille',
+        'cle': '',
+        'libelle': 'Famille libre',
+        'ordre': '10',
+        'actif': 'on',
+    }, follow_redirects=False)
+    assert response.status_code == 302
+
+    response = authenticated_client.post('/admin/system/referentiels/ajouter', data={
+        'groupe': 'produit_categorie',
+        'cle': '',
+        'libelle': 'Catégorie libre',
+        'parent_cle': 'Famille libre',
+        'ordre': '10',
+        'actif': 'on',
+    }, follow_redirects=False)
+    assert response.status_code == 302
+
+    response = authenticated_client.post('/admin/system/referentiels/ajouter', data={
+        'groupe': 'produit_sous_famille',
+        'cle': '',
+        'libelle': 'Sous-famille libre',
+        'parent_cle': 'Catégorie libre',
+        'ordre': '10',
+        'actif': 'on',
+    }, follow_redirects=False)
+    assert response.status_code == 302
+
+    response = authenticated_client.get('/commande/ajouter')
+    assert response.status_code == 200
+    assert 'ACHETEUR LIBRE' in response.get_data(as_text=True)
+
+    response = authenticated_client.get('/stock/produit/ajouter')
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'Famille libre' in body
+    assert 'Catégorie libre' in body
+    assert 'Sous-famille libre' in body
+
+
 def test_role_restrictions_for_achats_stock_manager_and_engineer(app_module):
     seed_paginated_data(app_module)
 

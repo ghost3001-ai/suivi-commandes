@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}Admin avancé - {{ config.label }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom gap-2">
+    <div>
+        <h1 class="h2 mb-1">
+            <i class="bi bi-database-gear"></i> {{ config.label }}
+        </h1>
+        <p class="text-muted mb-0">{{ config.description }}</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('admin_system_index') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Modèles
+        </a>
+        {% if action == 'list' %}
+        {% if config.get('create_enabled', True) %}
+        <a href="{{ url_for('admin_system_model_create', model_key=model_key) }}" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> Ajouter
+        </a>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+{% if action == 'list' %}
+{% if model_key == 'referentiels' %}
+<div class="alert alert-info">
+    <i class="bi bi-diagram-3 me-2"></i>
+    Créez ici les listes utilisées par l’application. Pour rattacher une catégorie à une famille, mettez
+    <code>groupe=produit_categorie</code>, <code>libelle=...</code> et <code>parent_cle</code> égal au libellé de la famille.
+    Pour une sous-famille, utilisez <code>groupe=produit_sous_famille</code> et <code>parent_cle</code> égal au libellé de la catégorie.
+</div>
+{% endif %}
+
+<div class="filters-bar">
+    <form method="GET" class="row g-3 align-items-end">
+        <div class="col-md-8 col-lg-9">
+            <label class="form-label small text-muted">Recherche</label>
+            <input type="search" name="q" class="form-control" value="{{ search }}" placeholder="Rechercher dans les champs principaux">
+        </div>
+        <div class="col-md-4 col-lg-3">
+            <button type="submit" class="btn btn-primary w-100">
+                <i class="bi bi-search"></i> Rechercher
+            </button>
+        </div>
+    </form>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <span>Enregistrements</span>
+        <small class="text-muted">{{ pagination.total }} résultat(s)</small>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        {% for column in columns %}
+                        <th>{{ column.name }}</th>
+                        {% endfor %}
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        {% for column in columns %}
+                        <td>{{ admin_display_value(row|attr(column.name)) }}</td>
+                        {% endfor %}
+                        <td class="text-end">
+                            <div class="btn-group btn-group-sm">
+                                <a href="{{ url_for('admin_system_model_edit', model_key=model_key, record_id=row.id) }}" class="btn btn-outline-primary" title="Modifier">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <form method="POST" action="{{ url_for('admin_system_model_delete', model_key=model_key, record_id=row.id) }}" class="d-inline">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-outline-danger" title="Supprimer" onclick="return confirm('Supprimer cet enregistrement ?')">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="{{ columns|length + 1 }}" class="text-center py-5 text-muted">
+                            <i class="bi bi-inbox fs-1"></i>
+                            <p class="mt-2 mb-0">Aucun enregistrement trouvé</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% include "_pagination.html" %}
+{% else %}
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <strong>{{ form_title }}</strong>
+    </div>
+    <div class="card-body">
+        <form method="POST" class="row g-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% for column in columns %}
+                {% set field_required = (not column.nullable) and not (model_key == 'referentiels' and column.name == 'cle') %}
+                {% if column.primary_key %}
+                <div class="col-md-6 col-xl-4">
+                    <label class="form-label">{{ column.name }}</label>
+                    <input type="text" class="form-control" value="{{ admin_form_value(row|attr(column.name)) }}" disabled>
+                </div>
+                {% else %}
+                    {% set value = row|attr(column.name) %}
+                    {% set fk_options = admin_foreign_key_options(column) %}
+                    {% if admin_column_input_type(column) == 'boolean' %}
+                    <div class="col-md-6 col-xl-4 d-flex align-items-end">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" role="switch" name="{{ column.name }}" id="field_{{ column.name }}" {% if value %}checked{% endif %}>
+                            <label class="form-check-label" for="field_{{ column.name }}">{{ column.name }}</label>
+                        </div>
+                    </div>
+                    {% elif fk_options %}
+                    <div class="col-md-6 col-xl-4">
+                        <label class="form-label" for="field_{{ column.name }}">{{ column.name }}</label>
+                        <select class="form-select" name="{{ column.name }}" id="field_{{ column.name }}" {% if field_required %}required{% endif %}>
+                            {% if column.nullable %}
+                            <option value="">Aucun</option>
+                            {% endif %}
+                            {% for option in fk_options %}
+                            <option value="{{ option.id }}" {% if value == option.id %}selected{% endif %}>#{{ option.id }} - {{ option }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% elif column.type.__class__.__name__ in ['Text', 'UnicodeText'] %}
+                    <div class="col-12">
+                        <label class="form-label" for="field_{{ column.name }}">{{ column.name }}</label>
+                        <textarea class="form-control" name="{{ column.name }}" id="field_{{ column.name }}" rows="4" {% if field_required %}required{% endif %}>{{ admin_form_value(value) }}</textarea>
+                    </div>
+                    {% else %}
+                    <div class="col-md-6 col-xl-4">
+                        <label class="form-label" for="field_{{ column.name }}">{{ column.name }}</label>
+                        <input type="{{ admin_column_input_type(column) }}" class="form-control" name="{{ column.name }}" id="field_{{ column.name }}" value="{{ admin_form_value(value) }}" {% if admin_column_input_type(column) == 'number' %}step="any"{% endif %} {% if field_required %}required{% endif %}>
+                    </div>
+                    {% endif %}
+                {% endif %}
+            {% endfor %}
+            <div class="col-12 d-flex justify-content-end gap-2 pt-3 border-top">
+                <a href="{{ url_for('admin_system_model_list', model_key=model_key) }}" class="btn btn-outline-secondary">Annuler</a>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check2"></i> Enregistrer
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

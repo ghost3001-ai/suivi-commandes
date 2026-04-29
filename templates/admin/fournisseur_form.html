@@ -45,7 +45,13 @@
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Catégorie</label>
-                    <input type="text" name="categorie" class="form-control" value="{{ fournisseur.categorie if fournisseur else '' }}">
+                    <input type="text" name="categorie" class="form-control" list="categorie-options" value="{{ fournisseur.categorie if fournisseur else '' }}">
+                    <datalist id="categorie-options">
+                        {% for categorie in categorie_options %}
+                        <option value="{{ categorie }}"></option>
+                        {% endfor %}
+                    </datalist>
+                    <div class="form-text">Ajoutez les catégories dans Admin avancé &gt; Référentiels avec le groupe <code>fournisseur_categorie</code>.</div>
                 </div>
             </div>
             

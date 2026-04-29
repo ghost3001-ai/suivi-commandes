@@ -30,7 +30,7 @@
             </div>
 
             <div class="row">
-                <div class="col-md-4 mb-3">
+                <div class="col-md-3 mb-3">
                     <label class="form-label">Famille</label>
                     <select name="famille" id="famille" class="form-select">
                         <option value="">Sélectionner une famille</option>
@@ -39,7 +39,7 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-4 mb-3">
+                <div class="col-md-3 mb-3">
                     <label class="form-label">Catégorie</label>
                     <select
                         name="categorie"
@@ -52,9 +52,23 @@
                         <option value="{{ categorie }}" {% if form_values.categorie == categorie %}selected{% endif %}>{{ categorie }}</option>
                         {% endfor %}
                     </select>
-                    <div class="form-text">Les 49 catégories sont préchargées. Choisis une famille pour filtrer la liste.</div>
+                    <div class="form-text">Les 49 catégories sont préchargées. Ajoutez les valeurs dans Admin avancé &gt; Référentiels.</div>
                 </div>
-                <div class="col-md-4 mb-3">
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Sous-famille</label>
+                    <select
+                        name="sous_famille"
+                        id="sous_famille"
+                        class="form-select"
+                        data-selected="{{ form_values.sous_famille }}"
+                    >
+                        <option value="">Sélectionner une sous-famille</option>
+                        {% for sous_famille in available_subfamilies %}
+                        <option value="{{ sous_famille }}" {% if form_values.sous_famille == sous_famille %}selected{% endif %}>{{ sous_famille }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3 mb-3">
                     <label class="form-label">Unité</label>
                     <input type="text" name="unite" class="form-control" placeholder="pièce, carton, mètre..." value="{{ form_values.unite }}">
                 </div>
@@ -229,6 +243,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const catalog = {{ catalog_ui | tojson }};
     const familySelect = document.getElementById('famille');
     const categorySelect = document.getElementById('categorie');
+    const subfamilySelect = document.getElementById('sous_famille');
     const replenishmentSelect = document.getElementById('methode_reappro');
     const periodicityWrapper = document.getElementById('periodicite-wrapper');
     const allCategories = [];
@@ -275,6 +290,19 @@ document.addEventListener('DOMContentLoaded', function () {
             categorySelect.value = '';
         }
         categorySelect.dataset.selected = categorySelect.value;
+        syncSubfamilies();
+    }
+
+    function syncSubfamilies() {
+        const selectedCategory = categorySelect.value;
+        const selectedSubfamily = subfamilySelect.dataset.selected || subfamilySelect.value;
+        const subfamilies = (catalog.subfamilies_by_category || {})[selectedCategory] || [];
+        renderOptions(subfamilySelect, subfamilies, 'Sélectionner une sous-famille', selectedSubfamily);
+
+        if (selectedSubfamily && !subfamilies.includes(selectedSubfamily)) {
+            subfamilySelect.value = '';
+        }
+        subfamilySelect.dataset.selected = subfamilySelect.value;
     }
 
     function syncPeriodiciteVisibility() {
@@ -284,7 +312,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     familySelect.addEventListener('change', function () {
         categorySelect.dataset.selected = '';
+        subfamilySelect.dataset.selected = '';
         syncCategories();
+    });
+    categorySelect.addEventListener('change', function () {
+        subfamilySelect.dataset.selected = '';
+        syncSubfamilies();
     });
 
     replenishmentSelect.addEventListener('change', syncPeriodiciteVisibility);

@@ -225,7 +225,9 @@
                         </td>
                         <td>
                             <div>{{ produit.get_type_stock_label() }}</div>
-                            <small class="text-muted">{{ produit.famille or '-' }}{% if produit.categorie %} / {{ produit.categorie }}{% endif %}</small>
+                            <small class="text-muted">
+                                {{ produit.famille or '-' }}{% if produit.categorie %} / {{ produit.categorie }}{% endif %}{% if produit.sous_famille %} / {{ produit.sous_famille }}{% endif %}
+                            </small>
                             <div class="mt-1">
                                 <span class="badge {% if produit.abc_classe == 'A' %}bg-danger{% elif produit.abc_classe == 'B' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
                                     ABC {{ produit.abc_classe }}
