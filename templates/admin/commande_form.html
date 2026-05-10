@@ -124,6 +124,77 @@
     </div>
 
     <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-boxes"></i> Articles commandés</h5>
+            {% if can_manage_core %}
+            <button type="button" class="btn btn-sm btn-outline-primary" id="addCommandeProductLine">
+                <i class="bi bi-plus-lg"></i> Ajouter
+            </button>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            {% if not can_manage_core %}
+            <div class="alert alert-warning py-2">
+                Cette section est en lecture seule pour votre profil.
+            </div>
+            {% endif %}
+            <div class="table-responsive">
+                <table class="table align-middle mb-0" id="commandeProductLines">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Article</th>
+                            <th class="text-end">Quantité commandée</th>
+                            <th class="text-end">Prix unitaire</th>
+                            <th class="text-end">Déjà reçu</th>
+                            {% if can_manage_core %}<th></th>{% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in product_lines %}
+                        <tr>
+                            <td>
+                                <input type="hidden" name="commande_produit_id[]" value="{{ line.id }}">
+                                <select name="commande_produit_produit_id[]" class="form-select commande-product-select" {% if not can_manage_core %}disabled{% endif %}>
+                                    <option value="">Sélectionner</option>
+                                    {% for produit in produits %}
+                                    <option value="{{ produit.id }}" data-price="{{ produit.prix_unitaire or 0 }}" {% if (line.produit_id|string) == (produit.id|string) %}selected{% endif %}>
+                                        {{ produit.nom }}{% if produit.code %} ({{ produit.code }}){% endif %}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <input type="number" step="0.01" min="0.01" name="commande_produit_quantite[]" class="form-control text-end" value="{{ line.quantite }}" {% if not can_manage_core %}disabled{% endif %}>
+                            </td>
+                            <td>
+                                <input type="number" step="0.01" min="0" name="commande_produit_prix_unitaire[]" class="form-control text-end commande-product-price" value="{{ line.prix_unitaire }}" {% if not can_manage_core %}disabled{% endif %}>
+                            </td>
+                            <td class="text-end">
+                                {% if line.quantite_recue not in ('', none) %}
+                                {{ "{:,.2f}".format(line.quantite_recue|float) }}
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                            {% if can_manage_core %}
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger remove-commande-product-line">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <small class="text-muted d-block mt-2">
+                Ces lignes permettent de comparer la commande, la réception et l'arriéré restant.
+            </small>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
         <div class="card-header bg-white">
             <h5 class="mb-0"><i class="bi bi-cash-stack"></i> Paiement fournisseur</h5>
         </div>
@@ -163,7 +234,7 @@
             {% endif %}
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">Date réception réelle</label>
+                    <label class="form-label">Date dernière réception</label>
                     <input type="date" name="date_reception" class="form-control" value="{{ form_values.date_reception }}" {% if not can_manage_reception %}disabled{% endif %}>
                 </div>
                 <div class="col-md-6 mb-3">
@@ -171,6 +242,42 @@
                     <input type="text" name="bon_livraison" class="form-control" value="{{ form_values.bon_livraison }}" {% if not can_manage_reception %}disabled{% endif %}>
                 </div>
             </div>
+            {% if commande and commande.produits_lies %}
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Article</th>
+                            <th class="text-end">Commandé</th>
+                            <th class="text-end">Reçu cumulé</th>
+                            <th class="text-end">Arriéré</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in commande.produits_lies|sort(attribute='id') %}
+                        <tr>
+                            <td>
+                                <input type="hidden" name="reception_ligne_id[]" value="{{ line.id }}">
+                                {{ line.produit.nom if line.produit else '-' }}
+                            </td>
+                            <td class="text-end">{{ "{:,.2f}".format(line.quantite or 0) }}</td>
+                            <td>
+                                <input type="number" step="0.01" min="0" max="{{ line.quantite or 0 }}" name="reception_quantite_recue[]" class="form-control text-end" value="{{ line.quantite_recue or 0 }}" {% if not can_manage_reception %}disabled{% endif %}>
+                            </td>
+                            <td class="text-end">
+                                <span class="badge {% if line.quantite_arriere > 0 %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                                    {{ "{:,.2f}".format(line.quantite_arriere or 0) }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <small class="text-muted d-block mt-2">
+                Saisissez la quantité reçue cumulée. Le stock est augmenté uniquement de la nouvelle quantité reçue.
+            </small>
+            {% endif %}
         </div>
     </div>
 
@@ -230,4 +337,51 @@
         </a>
     </div>
 </form>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{% if can_manage_core %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const tableBody = document.querySelector('#commandeProductLines tbody');
+    const addButton = document.getElementById('addCommandeProductLine');
+    if (!tableBody || !addButton) return;
+
+    const bindRow = (row) => {
+        const select = row.querySelector('.commande-product-select');
+        const priceInput = row.querySelector('.commande-product-price');
+        const removeButton = row.querySelector('.remove-commande-product-line');
+        if (select && priceInput) {
+            select.addEventListener('change', () => {
+                const selected = select.options[select.selectedIndex];
+                if (selected && selected.dataset.price && !priceInput.value) {
+                    priceInput.value = selected.dataset.price;
+                }
+            });
+        }
+        if (removeButton) {
+            removeButton.addEventListener('click', () => row.remove());
+        }
+    };
+
+    tableBody.querySelectorAll('tr').forEach(bindRow);
+    addButton.addEventListener('click', () => {
+        const template = tableBody.querySelector('tr');
+        if (!template) return;
+        const row = template.cloneNode(true);
+        row.querySelectorAll('input').forEach((input) => {
+            input.value = '';
+        });
+        row.querySelectorAll('select').forEach((select) => {
+            select.selectedIndex = 0;
+        });
+        const receivedCell = row.children[3];
+        if (receivedCell) receivedCell.textContent = '-';
+        bindRow(row);
+        tableBody.appendChild(row);
+    });
+});
+</script>
+{% endif %}
 {% endblock %}

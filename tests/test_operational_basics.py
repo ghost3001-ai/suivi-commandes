@@ -371,6 +371,100 @@ def test_command_payment_and_reception_flow_updates_statuses(app_module):
         assert commande.get_statut_avancement() == app_module.Commande.PHASE_ACHEVEE
 
 
+def test_partial_purchase_reception_updates_stock_and_backorder(app_module):
+    with app_module.app.app_context():
+        db = app_module.db
+        fournisseur = app_module.Fournisseur(nom='Fournisseur pneus', pays='Cameroun', categorie='Test')
+        produit = app_module.Produit(
+            nom='Pneu atelier',
+            code='PNEU-001',
+            stock_actuel=10,
+            stock_minimum=1,
+            prix_unitaire=20,
+            actif=True,
+        )
+        db.session.add_all([fournisseur, produit])
+        db.session.flush()
+
+        commande = app_module.Commande(
+            nr=1200,
+            date_cde=date.today(),
+            entite='AFRILUX',
+            demandeur='Magasin',
+            service_demandeur='Magasin',
+            acheteur='GILLES',
+            fournisseur_id=fournisseur.id,
+            affaire='Commande pneus',
+            bon_commande='BC-PART-001',
+            date_livraison=date.today(),
+            montant=2000,
+            avance=2000,
+            date_paiement=date.today(),
+            facture='FAC-PART-001',
+        )
+        commande.calculer_solde()
+        db.session.add(commande)
+        db.session.flush()
+        ligne = app_module.CommandeProduit(
+            commande=commande,
+            produit=produit,
+            quantite=100,
+            prix_unitaire=20,
+        )
+        ligne.calculer_montant()
+        db.session.add(ligne)
+        db.session.commit()
+        commande_id = commande.id
+        ligne_id = ligne.id
+        produit_id = produit.id
+
+    stock_client = build_role_client(app_module, 'gestionnaire_stock', 'partial_stock')
+    response = stock_client.post(
+        f'/commande/modifier/{commande_id}',
+        data={
+            'date_reception': date.today().isoformat(),
+            'bon_livraison': 'BL-PART-001',
+            'reception_ligne_id[]': [str(ligne_id)],
+            'reception_quantite_recue[]': ['60'],
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app_module.app.app_context():
+        commande = app_module.db.session.get(app_module.Commande, commande_id)
+        produit = app_module.db.session.get(app_module.Produit, produit_id)
+        ligne = app_module.db.session.get(app_module.CommandeProduit, ligne_id)
+        assert produit.stock_actuel == 70
+        assert ligne.quantite_recue == 60
+        assert ligne.quantite_arriere == 40
+        assert commande.est_reception_partielle()
+        assert not commande.est_achevee()
+        assert commande.get_statut_avancement() == app_module.Commande.PHASE_RECEPTION_PARTIELLE
+
+    response = stock_client.post(
+        f'/commande/modifier/{commande_id}',
+        data={
+            'date_reception': date.today().isoformat(),
+            'bon_livraison': 'BL-PART-002',
+            'reception_ligne_id[]': [str(ligne_id)],
+            'reception_quantite_recue[]': ['100'],
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    with app_module.app.app_context():
+        commande = app_module.db.session.get(app_module.Commande, commande_id)
+        produit = app_module.db.session.get(app_module.Produit, produit_id)
+        ligne = app_module.db.session.get(app_module.CommandeProduit, ligne_id)
+        assert produit.stock_actuel == 110
+        assert ligne.quantite_recue == 100
+        assert ligne.quantite_arriere == 0
+        assert commande.est_achevee()
+        assert app_module.MouvementStock.query.count() == 2
+
+
 def test_supplier_performance_filters_and_exports(authenticated_client, app_module):
     seed_paginated_data(app_module)
 

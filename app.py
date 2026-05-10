@@ -1074,6 +1074,165 @@ def get_commande_form_values(commande=None, form_data=None):
     }
 
 
+def get_commande_product_form_lines(commande=None, form_data=None):
+    """Construit les lignes articles du formulaire commande."""
+    if form_data is not None:
+        line_ids = form_data.getlist('commande_produit_id[]')
+        produit_ids = form_data.getlist('commande_produit_produit_id[]')
+        quantites = form_data.getlist('commande_produit_quantite[]')
+        prix_unitaires = form_data.getlist('commande_produit_prix_unitaire[]')
+        max_count = max(len(line_ids), len(produit_ids), len(quantites), len(prix_unitaires), 1)
+        return [
+            {
+                'id': line_ids[index] if index < len(line_ids) else '',
+                'produit_id': produit_ids[index] if index < len(produit_ids) else '',
+                'quantite': quantites[index] if index < len(quantites) else '',
+                'prix_unitaire': prix_unitaires[index] if index < len(prix_unitaires) else '',
+                'quantite_recue': '',
+            }
+            for index in range(max_count)
+        ]
+
+    if commande is not None and commande.produits_lies:
+        return [
+            {
+                'id': ligne.id,
+                'produit_id': ligne.produit_id,
+                'quantite': ligne.quantite if ligne.quantite is not None else '',
+                'prix_unitaire': ligne.prix_unitaire if ligne.prix_unitaire is not None else '',
+                'quantite_recue': ligne.quantite_recue if ligne.quantite_recue is not None else 0,
+            }
+            for ligne in sorted(commande.produits_lies, key=lambda item: item.id or 0)
+        ]
+
+    return [{'id': '', 'produit_id': '', 'quantite': '', 'prix_unitaire': '', 'quantite_recue': ''}]
+
+
+def parse_commande_product_lines(form_data, commande=None):
+    """Valide les lignes articles d'une commande fournisseur."""
+    line_ids = form_data.getlist('commande_produit_id[]')
+    produit_ids = form_data.getlist('commande_produit_produit_id[]')
+    quantites = form_data.getlist('commande_produit_quantite[]')
+    prix_unitaires = form_data.getlist('commande_produit_prix_unitaire[]')
+    max_count = max(len(line_ids), len(produit_ids), len(quantites), len(prix_unitaires), 0)
+    existing_by_id = {ligne.id: ligne for ligne in commande.produits_lies} if commande else {}
+    seen_products = set()
+    parsed_lines = []
+
+    for index in range(max_count):
+        line_id_raw = (line_ids[index] if index < len(line_ids) else '').strip()
+        produit_id_raw = (produit_ids[index] if index < len(produit_ids) else '').strip()
+        quantite_raw = (quantites[index] if index < len(quantites) else '').strip()
+        prix_raw = (prix_unitaires[index] if index < len(prix_unitaires) else '').strip()
+
+        if not any([line_id_raw, produit_id_raw, quantite_raw, prix_raw]):
+            continue
+        if not produit_id_raw.isdigit():
+            raise ValueError(f'Article invalide à la ligne {index + 1}')
+
+        produit_id = int(produit_id_raw)
+        if produit_id in seen_products:
+            raise ValueError('Un même article ne peut pas être saisi deux fois sur la commande')
+        seen_products.add(produit_id)
+
+        produit = db.session.get(Produit, produit_id)
+        if not produit or not produit.actif:
+            raise ValueError(f'Article introuvable ou inactif à la ligne {index + 1}')
+
+        line_id = int(line_id_raw) if line_id_raw.isdigit() else None
+        existing_line = existing_by_id.get(line_id) if line_id else None
+        quantite = valider_quantite(quantite_raw)
+        prix_unitaire = valider_montant(prix_raw)
+        quantite_recue = float(existing_line.quantite_recue or 0) if existing_line else 0
+        if quantite < quantite_recue:
+            raise ValueError(
+                f'La quantité commandée de {produit.nom} ne peut pas être inférieure '
+                f'à la quantité déjà reçue ({quantite_recue:g})'
+            )
+
+        parsed_lines.append({
+            'id': line_id,
+            'produit': produit,
+            'quantite': quantite,
+            'prix_unitaire': prix_unitaire,
+            'quantite_recue': quantite_recue,
+        })
+
+    return parsed_lines
+
+
+def sync_commande_product_lines(commande, parsed_lines):
+    """Synchronise les articles commandés en conservant les réceptions déjà faites."""
+    existing_by_id = {ligne.id: ligne for ligne in commande.produits_lies}
+    kept_ids = set()
+
+    for line_data in parsed_lines:
+        ligne = existing_by_id.get(line_data['id']) if line_data['id'] else None
+        if ligne is None:
+            ligne = CommandeProduit(commande=commande)
+            db.session.add(ligne)
+
+        ligne.produit = line_data['produit']
+        ligne.quantite = line_data['quantite']
+        ligne.prix_unitaire = line_data['prix_unitaire']
+        ligne.quantite_recue = line_data['quantite_recue']
+        ligne.calculer_montant()
+        db.session.flush()
+        kept_ids.add(ligne.id)
+
+    for ligne in list(commande.produits_lies):
+        if ligne.id in kept_ids:
+            continue
+        if float(ligne.quantite_recue or 0) > 0:
+            raise ValueError(f'Impossible de supprimer {ligne.produit.nom}: une quantité a déjà été réceptionnée')
+        db.session.delete(ligne)
+
+
+def apply_commande_reception_lines(commande, form_data):
+    """Applique la réception cumulative des articles et crée les mouvements de stock."""
+    if not commande.produits_lies:
+        return 0
+
+    line_ids = form_data.getlist('reception_ligne_id[]')
+    received_values = form_data.getlist('reception_quantite_recue[]')
+    lines_by_id = {ligne.id: ligne for ligne in commande.produits_lies}
+    movement_count = 0
+
+    for index, line_id_raw in enumerate(line_ids):
+        if not line_id_raw or not line_id_raw.isdigit():
+            continue
+        ligne = lines_by_id.get(int(line_id_raw))
+        if ligne is None:
+            raise ValueError('Ligne de réception invalide')
+
+        received_raw = received_values[index] if index < len(received_values) else ''
+        target_received = valider_nombre_non_negatif(received_raw, f'Quantité reçue {ligne.produit.nom}')
+        ordered_quantity = float(ligne.quantite or 0)
+        if target_received > ordered_quantity:
+            raise ValueError(
+                f'La quantité reçue de {ligne.produit.nom} dépasse la quantité commandée ({ordered_quantity:g})'
+            )
+
+        previous_received = float(ligne.quantite_recue or 0)
+        delta = target_received - previous_received
+        if abs(delta) <= 0.000001:
+            ligne.quantite_recue = target_received
+            continue
+
+        mouvement_type = MouvementStock.TYPE_ENTREE if delta > 0 else MouvementStock.TYPE_AJUSTEMENT
+        appliquer_mouvement_stock(
+            ligne.produit,
+            delta,
+            mouvement_type,
+            f'Réception commande {commande.bon_commande or commande.nr} - {ligne.produit.nom}',
+        )
+        ligne.quantite_recue = target_received
+        movement_count += 1
+
+    commande.rupture_fournisseur = commande.est_reception_partielle()
+    return movement_count
+
+
 def get_product_category_catalog():
     """Retourne le référentiel familles/catégories des produits."""
     catalog = get_category_catalog(
@@ -3534,6 +3693,27 @@ def build_supplier_performance_data(start_date=None, end_date=None, fournisseur_
         service_score = score_performance or 0
         price_score = 5 if price_competitiveness_pct is None else clamp(5 - max(price_competitiveness_pct, 0) / 5, 0, 5)
         rupture_score = clamp(5 - (taux_rupture / 5), 0, 5) if row.total_commandes else 0
+        service_rate_score_10 = clamp((100 - taux_rupture) / 10, 0, 10) if row.total_commandes else None
+        quality_score_10 = clamp(taux_conformite / 10, 0, 10) if row.total_commandes else None
+        delay_score_10 = clamp(respect_delai / 10, 0, 10) if deliveries_with_actual else None
+        reactive_score_10 = (service_score / 5 * 10) if score_performance is not None else None
+        weighted_performance_parts = [
+            service_rate_score_10 * 0.4 if service_rate_score_10 is not None else None,
+            quality_score_10 * 0.3 if quality_score_10 is not None else None,
+            delay_score_10 * 0.2 if delay_score_10 is not None else None,
+            reactive_score_10 * 0.1 if reactive_score_10 is not None else None,
+        ]
+        valid_weighted_parts = [part for part in weighted_performance_parts if part is not None]
+        global_performance_10 = sum(valid_weighted_parts) if valid_weighted_parts else None
+        partial_cost_rate = (taux_rupture or 0) / 100 * 0.08
+        defect_cost_rate = max(100 - (taux_conformite or 0), 0) / 100 * 0.08
+        late_cost_rate = (taux_retard or 0) / 100 * 0.12
+        total_cost_estimated = float(row.montant_moyen or 0) * (1 + partial_cost_rate + defect_cost_rate + late_cost_rate)
+        quality_price_ratio = (
+            global_performance_10 / total_cost_estimated
+            if global_performance_10 is not None and total_cost_estimated > 0
+            else None
+        )
         score_value = average_non_null(
             price_score if price_competitiveness_pct is not None else None,
             quality_score if row.total_commandes else None,
@@ -3584,6 +3764,13 @@ def build_supplier_performance_data(start_date=None, end_date=None, fournisseur_
             'score_value': round(score_value, 2) if score_value is not None else None,
             'score_rupture': round(rupture_score, 2),
             'score_fiabilite': round(score_fiabilite, 1),
+            'service_rate_score_10': round(service_rate_score_10, 1) if service_rate_score_10 is not None else None,
+            'quality_score_10': round(quality_score_10, 1) if quality_score_10 is not None else None,
+            'delay_score_10': round(delay_score_10, 1) if delay_score_10 is not None else None,
+            'reactive_score_10': round(reactive_score_10, 1) if reactive_score_10 is not None else None,
+            'global_performance_10': round(global_performance_10, 2) if global_performance_10 is not None else None,
+            'total_cost_estimated': round(total_cost_estimated, 2),
+            'quality_price_ratio': round(quality_price_ratio, 6) if quality_price_ratio is not None else None,
             'price_competitiveness_pct': round(price_competitiveness_pct, 1) if price_competitiveness_pct is not None else None,
             'deliveries_with_actual': deliveries_with_actual,
             'quadrant': quadrant,
@@ -3655,6 +3842,15 @@ def build_supplier_performance_data(start_date=None, end_date=None, fournisseur_
         ),
         default=None,
     )
+    best_quality_price_supplier = max(
+        [supplier for supplier in items if supplier['quality_price_ratio'] is not None],
+        key=lambda supplier: (
+            supplier['quality_price_ratio'],
+            supplier['global_performance_10'] or 0,
+            -(supplier['total_cost_estimated'] or 0),
+        ),
+        default=None,
+    )
     negotiation_supplier = max(
         [
             supplier for supplier in items
@@ -3701,6 +3897,7 @@ def build_supplier_performance_data(start_date=None, end_date=None, fournisseur_
         'evolution_labels': [month_start.strftime('%b %Y') for month_start in month_series],
         'evolution_datasets': evolution_datasets,
         'best_value_supplier': best_value_supplier,
+        'best_quality_price_supplier': best_quality_price_supplier,
         'negotiation_supplier': negotiation_supplier,
         'late_supplier': late_supplier,
     }
@@ -4307,9 +4504,10 @@ def build_procurement_analyst_context(filters, commandes_query, stock_query, mon
 
     budget_target = float(app.config.get('DASHBOARD_PURCHASE_BUDGET') or 0)
     budget_warning_pct = float(app.config.get('DASHBOARD_BUDGET_WARNING_PCT') or 85)
-    budget_usage_pct = (float(montant_total or 0) / budget_target * 100) if budget_target > 0 else None
-    budget_remaining = max(budget_target - float(montant_total or 0), 0) if budget_target > 0 else None
-    budget_overrun = max(float(montant_total or 0) - budget_target, 0) if budget_target > 0 else None
+    budget_spend_total = db.session.query(func.coalesce(func.sum(Commande.montant), 0)).scalar() or 0
+    budget_usage_pct = (float(budget_spend_total or 0) / budget_target * 100) if budget_target > 0 else None
+    budget_remaining = max(budget_target - float(budget_spend_total or 0), 0) if budget_target > 0 else None
+    budget_overrun = max(float(budget_spend_total or 0) - budget_target, 0) if budget_target > 0 else None
 
     if budget_usage_pct is None:
         budget_level = 'info'
@@ -4646,6 +4844,7 @@ def build_procurement_analyst_context(filters, commandes_query, stock_query, mon
     return {
         'procurement_budget': {
             'target': budget_target,
+            'spend_total': float(budget_spend_total or 0),
             'usage_pct': round(budget_usage_pct, 1) if budget_usage_pct is not None else None,
             'warning_pct': budget_warning_pct,
             'remaining': budget_remaining,
@@ -5585,6 +5784,9 @@ def build_supplier_performance_excel_bytes(filters, analytics=None):
         'Montant moyen': supplier['montant_moyen'],
         'Montant à payer': supplier['montant_a_payer'],
         'Score performance': supplier['score_performance'],
+        'Performance globale (/10)': supplier['global_performance_10'],
+        'Coût total estimé': supplier['total_cost_estimated'],
+        'Rapport qualité/prix': supplier['quality_price_ratio'],
         'Fiabilité (/100)': supplier['score_fiabilite'],
         'Délai moyen (j)': supplier['delai_moyen'],
         'Respect délai (%)': supplier['respect_delai'],
@@ -5765,6 +5967,9 @@ def build_supplier_detail_excel_bytes(fournisseur, filters, payload=None):
         'Montant à payer': supplier_stats['montant_a_payer'],
         'Montant moyen': supplier_stats['montant_moyen'],
         'Score performance': supplier_stats['score_performance'],
+        'Performance globale (/10)': supplier_stats['global_performance_10'],
+        'Coût total estimé': supplier_stats['total_cost_estimated'],
+        'Rapport qualité/prix': supplier_stats['quality_price_ratio'],
         'Conformité (%)': supplier_stats['taux_conformite'],
         'Rupture (%)': supplier_stats['taux_rupture'],
         'Délai moyen (j)': supplier_stats['delai_moyen'],
@@ -5861,6 +6066,9 @@ def build_supplier_detail_pdf_bytes(fournisseur, filters, payload=None):
         ['À payer', fmt_money(supplier_stats['montant_a_payer'])],
         ['Montant moyen', fmt_money(supplier_stats['montant_moyen'])],
         ['Score performance', f"{float(supplier_stats['score_performance'] or 0):.2f}/5" if supplier_stats['score_performance'] is not None else '-'],
+        ['Performance globale', f"{float(supplier_stats['global_performance_10'] or 0):.2f}/10" if supplier_stats['global_performance_10'] is not None else '-'],
+        ['Coût total estimé', fmt_money(supplier_stats['total_cost_estimated'])],
+        ['Rapport qualité/prix', f"{float(supplier_stats['quality_price_ratio'] or 0):.6f}" if supplier_stats['quality_price_ratio'] is not None else '-'],
         ['Conformité', f"{float(supplier_stats['taux_conformite'] or 0):.1f}%"],
         ['Rupture', f"{float(supplier_stats['taux_rupture'] or 0):.1f}%"],
         ['Délai moyen', f"{float(supplier_stats['delai_moyen'] or 0):.1f} j" if supplier_stats['delai_moyen'] is not None else '-'],
@@ -6522,7 +6730,10 @@ def commandes():
     recherche = request.args.get('recherche', '')
     page = get_requested_page()
     
-    base_query = Commande.query.options(selectinload(Commande.fournisseur))
+    base_query = Commande.query.options(
+        selectinload(Commande.fournisseur),
+        selectinload(Commande.produits_lies),
+    )
     
     if entite:
         base_query = base_query.filter(Commande.entite == entite)
@@ -6603,8 +6814,10 @@ def ajouter_commande():
 
     ensure_supplier_reference_data()
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
+    produits = Produit.query.filter_by(actif=True).order_by(Produit.nom).all()
     commande_capabilities = get_commande_edit_capabilities()
     form_values = get_commande_form_values(form_data=request.form if request.method == 'POST' else None)
+    product_lines = get_commande_product_form_lines(form_data=request.form if request.method == 'POST' else None)
     entite_options = get_commande_entite_options()
     acheteur_options = get_commande_acheteur_options()
     services_demandeur = get_service_demandeur_options()
@@ -6625,6 +6838,7 @@ def ajouter_commande():
             service_demandeur = valider_service_demandeur(request.form.get('service_demandeur'))
             if not service_demandeur:
                 raise ValueError('Service demandeur obligatoire')
+            parsed_product_lines = parse_commande_product_lines(request.form)
 
             date_paiement = parse_commande_date_input(
                 request.form.get('date_paiement'),
@@ -6668,6 +6882,10 @@ def ajouter_commande():
             )
             commande.calculer_solde()
             db.session.add(commande)
+            db.session.flush()
+            sync_commande_product_lines(commande, parsed_product_lines)
+            if commande_capabilities['can_manage_reception']:
+                apply_commande_reception_lines(commande, request.form)
             db.session.commit()
             
             # Log
@@ -6691,8 +6909,10 @@ def ajouter_commande():
     
     return render_template('admin/commande_form.html', 
                          fournisseurs=fournisseurs, 
+                         produits=produits,
                          commande=None,
                          form_values=form_values,
+                         product_lines=product_lines,
                          commande_capabilities=commande_capabilities,
                          entite_options=entite_options,
                          acheteur_options=acheteur_options,
@@ -6707,9 +6927,13 @@ def modifier_commande(id):
         return redirect_access_denied('commandes')
 
     ensure_supplier_reference_data()
-    commande = Commande.query.get_or_404(id)
+    commande = Commande.query.options(
+        selectinload(Commande.produits_lies).selectinload(CommandeProduit.produit)
+    ).get_or_404(id)
     fournisseurs = Fournisseur.query.order_by(Fournisseur.nom).all()
+    produits = Produit.query.filter_by(actif=True).order_by(Produit.nom).all()
     form_values = get_commande_form_values(commande, request.form if request.method == 'POST' else None)
+    product_lines = get_commande_product_form_lines(commande, request.form if request.method == 'POST' else None)
     entite_options = get_commande_entite_options()
     acheteur_options = get_commande_acheteur_options()
     services_demandeur = get_service_demandeur_options()
@@ -6719,6 +6943,7 @@ def modifier_commande(id):
             updated_values = {}
 
             if commande_capabilities['can_manage_core']:
+                parsed_product_lines = parse_commande_product_lines(request.form, commande=commande)
                 service_demandeur = valider_service_demandeur(request.form.get('service_demandeur'))
                 if not service_demandeur:
                     raise ValueError('Service demandeur obligatoire')
@@ -6790,6 +7015,11 @@ def modifier_commande(id):
             for field_name, field_value in updated_values.items():
                 setattr(commande, field_name, field_value)
             commande.calculer_solde()
+            if commande_capabilities['can_manage_core']:
+                sync_commande_product_lines(commande, parsed_product_lines)
+                db.session.flush()
+            if commande_capabilities['can_manage_reception']:
+                apply_commande_reception_lines(commande, request.form)
             
             db.session.commit()
             
@@ -6815,7 +7045,9 @@ def modifier_commande(id):
     return render_template('admin/commande_form.html', 
                          commande=commande, 
                          form_values=form_values,
+                         product_lines=product_lines,
                          fournisseurs=fournisseurs,
+                         produits=produits,
                          commande_capabilities=commande_capabilities,
                          entite_options=entite_options,
                          acheteur_options=acheteur_options,
@@ -6829,7 +7061,9 @@ def supprimer_commande(id):
     if denied_response:
         return denied_response
     
-    commande = Commande.query.get_or_404(id)
+    commande = Commande.query.options(
+        selectinload(Commande.produits_lies).selectinload(CommandeProduit.produit)
+    ).get_or_404(id)
     
     try:
         # Log avant suppression
@@ -8128,6 +8362,9 @@ def migrate_existing_schema():
             'note_service': 'FLOAT',
             'updated_at': 'TIMESTAMP',
         },
+        'commande_produits': {
+            'quantite_recue': 'FLOAT',
+        },
         'produits': {
             'code': 'VARCHAR(50)',
             'description': 'TEXT',
@@ -8284,6 +8521,15 @@ def migrate_existing_schema():
                       AND CAST({column_name} AS TEXT) NOT GLOB
                         '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
                 """))
+
+        if 'commande_produits' in existing_tables:
+            connection.execute(text("""
+                UPDATE commande_produits
+                SET quantite_recue = COALESCE(quantite_recue, 0),
+                    quantite = COALESCE(quantite, 0),
+                    prix_unitaire = COALESCE(prix_unitaire, 0),
+                    montant_total = COALESCE(montant_total, COALESCE(quantite, 0) * COALESCE(prix_unitaire, 0))
+            """))
 
 def init_db():
     """Initialise la base de données avec un utilisateur admin par défaut"""
@@ -8500,6 +8746,7 @@ def performances_fournisseurs():
         stats=analytics['items'],
         summary=analytics['summary'],
         best_value_supplier=analytics['best_value_supplier'],
+        best_quality_price_supplier=analytics['best_quality_price_supplier'],
         negotiation_supplier=analytics['negotiation_supplier'],
         late_supplier=analytics['late_supplier'],
         matrix_points=analytics['matrix_points'],
@@ -8594,6 +8841,9 @@ def performance_fournisseur_detail(id):
         price_competitiveness_pct=supplier_stats['price_competitiveness_pct'],
         score_fiabilite=supplier_stats['score_fiabilite'],
         score_value=supplier_stats['score_value'],
+        global_performance_10=supplier_stats['global_performance_10'],
+        total_cost_estimated=supplier_stats['total_cost_estimated'],
+        quality_price_ratio=supplier_stats['quality_price_ratio'],
         supplier_insight=payload['supplier_insight'],
         filtres=filters,
         period_label=get_period_label(filters),

@@ -58,6 +58,7 @@ class Commande(db.Model):
     STATUT_A_PAYER = 'A PAYER'
     PHASE_EN_COURS = 'EN COURS'
     PHASE_ACHEVEE = 'ACHEVÉE'
+    PHASE_RECEPTION_PARTIELLE = 'RÉCEPTION PARTIELLE'
     
     id = db.Column(db.Integer, primary_key=True)
     nr = db.Column(db.Integer)
@@ -99,17 +100,45 @@ class Commande(db.Model):
         return self.statut == self.STATUT_PAYE
 
     def est_achevee(self):
-        return self.est_payee() and self.date_reception is not None and bool((self.bon_livraison or '').strip())
+        reception_ok = self.date_reception is not None and bool((self.bon_livraison or '').strip())
+        if self.produits_lies:
+            reception_ok = reception_ok and self.est_totalement_recue()
+        return self.est_payee() and reception_ok
 
     def get_statut_avancement(self):
+        if self.est_reception_partielle():
+            return self.PHASE_RECEPTION_PARTIELLE
         return self.PHASE_ACHEVEE if self.est_achevee() else self.PHASE_EN_COURS
 
     def get_niveau_processus(self):
         if self.est_achevee():
             return 'Commande achevée'
+        if self.est_reception_partielle():
+            return 'Réception partielle, arriéré attendu'
         if self.est_payee():
             return 'Payée, en attente de réception'
         return 'En attente de paiement'
+
+    def get_total_quantite_commandee(self):
+        return sum(float(ligne.quantite or 0) for ligne in self.produits_lies)
+
+    def get_total_quantite_recue(self):
+        return sum(float(ligne.quantite_recue or 0) for ligne in self.produits_lies)
+
+    def get_total_quantite_arriere(self):
+        return max(self.get_total_quantite_commandee() - self.get_total_quantite_recue(), 0)
+
+    def get_taux_reception(self):
+        total = self.get_total_quantite_commandee()
+        if total <= 0:
+            return None
+        return min(self.get_total_quantite_recue() / total * 100, 100)
+
+    def est_reception_partielle(self):
+        return bool(self.produits_lies) and self.get_total_quantite_recue() > 0 and self.get_total_quantite_arriere() > 0.000001
+
+    def est_totalement_recue(self):
+        return bool(self.produits_lies) and self.get_total_quantite_commandee() > 0 and self.get_total_quantite_arriere() <= 0.000001
 
     def get_ecart_livraison(self):
         """Retourne l'écart entre date prévue et date réelle."""
@@ -164,6 +193,10 @@ class Commande(db.Model):
             'delai': self.get_delai(),
             'ecart_livraison': self.get_ecart_livraison(),
             'ecart_prix_marche_pct': self.get_ecart_prix_marche_pct(),
+            'quantite_commandee': self.get_total_quantite_commandee(),
+            'quantite_recue': self.get_total_quantite_recue(),
+            'quantite_arriere': self.get_total_quantite_arriere(),
+            'taux_reception': self.get_taux_reception(),
         }
     
     def __repr__(self):
@@ -378,6 +411,7 @@ class CommandeProduit(db.Model):
     commande_id = db.Column(db.Integer, db.ForeignKey('commandes.id'), index=True)
     produit_id = db.Column(db.Integer, db.ForeignKey('produits.id'), index=True)
     quantite = db.Column(db.Float, default=1)
+    quantite_recue = db.Column(db.Float, default=0)
     prix_unitaire = db.Column(db.Float, default=0)
     montant_total = db.Column(db.Float, default=0)
     
@@ -388,6 +422,17 @@ class CommandeProduit(db.Model):
     def calculer_montant(self):
         self.montant_total = self.quantite * self.prix_unitaire
         return self.montant_total
+
+    @property
+    def quantite_arriere(self):
+        return max(float(self.quantite or 0) - float(self.quantite_recue or 0), 0)
+
+    @property
+    def taux_reception(self):
+        quantite = float(self.quantite or 0)
+        if quantite <= 0:
+            return None
+        return min(float(self.quantite_recue or 0) / quantite * 100, 100)
 
 
 class Vente(db.Model):

@@ -145,6 +145,14 @@
                             <span class="badge {% if c.est_achevee() %}bg-success{% else %}bg-warning text-dark{% endif %}">
                                 {{ c.get_statut_avancement() }}
                             </span>
+                            {% if c.produits_lies %}
+                            <div class="small text-muted">
+                                Reçu {{ "{:,.1f}".format(c.get_taux_reception() or 0) }}%
+                                {% if c.get_total_quantite_arriere() > 0 %}
+                                • Arriéré {{ "{:,.2f}".format(c.get_total_quantite_arriere()) }}
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </td>
                         <td>
                             <div>{{ c.get_niveau_processus() }}</div>

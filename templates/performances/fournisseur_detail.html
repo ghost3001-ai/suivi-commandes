@@ -150,6 +150,24 @@
             </div>
         </div>
     </div>
+    <div class="col-lg-4 col-md-6 mb-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <small class="text-muted">Rapport qualité/prix</small>
+                <h4 class="mb-1 mt-2">
+                    {% if quality_price_ratio is not none %}
+                    {{ "{:,.6f}".format(quality_price_ratio) }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </h4>
+                <div class="small text-muted">
+                    Performance {{ "{:,.2f}".format(global_performance_10 or 0) }}/10 •
+                    coût estimé {{ "{:,.0f}".format(total_cost_estimated or 0) }} FCFA
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="row mb-4">

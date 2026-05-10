@@ -3,6 +3,7 @@
 {% block title %}Performance Fournisseurs{% endblock %}
 
 {% block content %}
+{% set qprice = best_quality_price_supplier or best_value_supplier %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
     <h1 class="h2">
         <i class="bi bi-truck"></i> Performance par Fournisseur
@@ -126,14 +127,14 @@
                 <h5 class="mb-0"><i class="bi bi-stars text-success"></i> Classement Data Analyst</h5>
             </div>
             <div class="card-body">
-                {% if best_value_supplier %}
-                <div class="fw-semibold">{{ best_value_supplier.nom }} = meilleur rapport qualité/prix</div>
+                {% if qprice %}
+                <div class="fw-semibold">{{ qprice.nom }} = meilleur rapport qualité/prix</div>
                 <div class="small text-muted mt-2">
-                    Score valeur {{ "{:,.2f}".format(best_value_supplier.score_value or 0) }}/5 •
-                    fiabilité {{ "{:,.1f}".format(best_value_supplier.score_fiabilite or 0) }}/100 •
-                    conformité {{ "{:,.1f}".format(best_value_supplier.taux_conformite or 0) }}%
+                    Performance {{ "{:,.2f}".format(qprice.global_performance_10 or 0) }}/10 •
+                    coût estimé {{ "{:,.0f}".format(qprice.total_cost_estimated or 0) }} FCFA •
+                    Q/P {{ "{:,.6f}".format(qprice.quality_price_ratio or 0) }}
                 </div>
-                <a href="{{ url_for('performance_fournisseur_detail', id=best_value_supplier.id) }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="btn btn-sm btn-outline-success mt-3">
+                <a href="{{ url_for('performance_fournisseur_detail', id=qprice.id) }}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}" class="btn btn-sm btn-outline-success mt-3">
                     Voir le fournisseur
                 </a>
                 {% else %}
@@ -217,6 +218,9 @@
                         <th>Commandes</th>
                         <th class="text-end">Montant</th>
                         <th class="text-end">Score</th>
+                        <th class="text-end">Performance /10</th>
+                        <th class="text-end">Coût estimé</th>
+                        <th class="text-end">Rapport Q/P</th>
                         <th class="text-end">Délai</th>
                         <th class="text-end">Conformité</th>
                         <th class="text-end">Rupture</th>
@@ -242,6 +246,23 @@
                             </span>
                             {% else %}
                             <span class="badge bg-secondary">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            {% if s.global_performance_10 is not none %}
+                            {{ "{:,.2f}".format(s.global_performance_10) }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td class="text-end">{{ "{:,.0f}".format(s.total_cost_estimated or 0) }} FCFA</td>
+                        <td class="text-end">
+                            {% if s.quality_price_ratio is not none %}
+                            <span class="badge {% if qprice and s.id == qprice.id %}bg-success{% else %}bg-light text-dark{% endif %}">
+                                {{ "{:,.6f}".format(s.quality_price_ratio) }}
+                            </span>
+                            {% else %}
+                            -
                             {% endif %}
                         </td>
                         <td class="text-end">
@@ -298,7 +319,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="11" class="text-center py-4 text-muted">Aucune donnée fournisseur</td>
+                        <td colspan="14" class="text-center py-4 text-muted">Aucune donnée fournisseur</td>
                     </tr>
                     {% endfor %}
                 </tbody>
