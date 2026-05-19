@@ -66,6 +66,7 @@
                 <small class="text-muted">Niveau de traitement</small>
                 <h4 class="mt-2 mb-1">{{ commande.get_niveau_processus() }}</h4>
                 <div class="text-muted small">Bon livraison: {{ commande.bon_livraison or '-' }}</div>
+                <div class="text-muted small">Magasin: {{ commande.magasin_reception or '-' }}</div>
             </div>
         </div>
     </div>
@@ -234,6 +235,9 @@
 
                     <dt class="col-sm-6">Bon livraison</dt>
                     <dd class="col-sm-6 text-end">{{ commande.bon_livraison or '-' }}</dd>
+
+                    <dt class="col-sm-6">Magasin</dt>
+                    <dd class="col-sm-6 text-end">{{ commande.magasin_reception or '-' }}</dd>
 
                     <dt class="col-sm-6">Écart livraison</dt>
                     <dd class="col-sm-6 text-end">

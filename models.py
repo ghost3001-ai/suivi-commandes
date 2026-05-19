@@ -73,6 +73,7 @@ class Commande(db.Model):
     date_livraison = db.Column(db.Date, index=True)
     date_reception = db.Column(db.Date, index=True)
     bon_livraison = db.Column(db.String(100))
+    magasin_reception = db.Column(db.String(120), index=True)
     facture = db.Column(db.String(100), index=True)
     montant = db.Column(db.Float, default=0)
     avance = db.Column(db.Float, default=0)
@@ -176,6 +177,7 @@ class Commande(db.Model):
             'date_livraison': self.date_livraison.isoformat() if self.date_livraison else None,
             'date_reception': self.date_reception.isoformat() if self.date_reception else None,
             'bon_livraison': self.bon_livraison,
+            'magasin_reception': self.magasin_reception,
             'facture': self.facture,
             'montant': self.montant,
             'avance': self.avance,

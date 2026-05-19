@@ -231,6 +231,63 @@ def test_reference_options_feed_business_forms(authenticated_client, app_module)
     assert 'Sous-famille libre' in body
 
 
+def test_order_creation_persists_reception_store(authenticated_client, app_module):
+    with app_module.app.app_context():
+        fournisseur = app_module.Fournisseur(nom='Fournisseur magasin', pays='Cameroun', categorie='Test')
+        produit = app_module.Produit(
+            nom='Article creation commande',
+            code='ART-CDE-001',
+            prix_unitaire=250,
+            stock_actuel=0,
+            actif=True,
+        )
+        app_module.db.session.add_all([fournisseur, produit])
+        app_module.db.session.commit()
+        fournisseur_id = fournisseur.id
+        produit_id = produit.id
+
+    response = authenticated_client.get('/commande/ajouter')
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'addCommandeProductLine' in body
+    assert 'commandeProductLineTemplate' in body
+
+    response = authenticated_client.post('/commande/ajouter', data={
+        'nr': '4100',
+        'date_cde': date.today().isoformat(),
+        'entite': 'AFRILUX',
+        'acheteur': 'GILLES',
+        'service_demandeur': 'Magasin',
+        'demandeur': 'Equipe stock',
+        'fournisseur_id': str(fournisseur_id),
+        'bon_commande': 'BC-MAG-001',
+        'date_livraison': date.today().isoformat(),
+        'magasin_reception': 'Magasin central',
+        'montant': '1500',
+        'avance': '0',
+        'affaire': 'Commande stockee au magasin central',
+        'commande_conforme': 'on',
+        'commande_produit_id[]': [''],
+        'commande_produit_produit_id[]': [str(produit_id)],
+        'commande_produit_quantite[]': ['3'],
+        'commande_produit_prix_unitaire[]': ['250'],
+    }, follow_redirects=False)
+    assert response.status_code == 302
+
+    with app_module.app.app_context():
+        commande = app_module.Commande.query.filter_by(bon_commande='BC-MAG-001').one()
+        assert commande.magasin_reception == 'Magasin central'
+        assert len(commande.produits_lies) == 1
+        assert commande.produits_lies[0].produit_id == produit_id
+        assert commande.produits_lies[0].quantite == 3
+        assert commande.produits_lies[0].prix_unitaire == 250
+        commande_id = commande.id
+
+    response = authenticated_client.get(f'/commande/{commande_id}')
+    assert response.status_code == 200
+    assert 'Magasin central' in response.get_data(as_text=True)
+
+
 def test_role_restrictions_for_achats_stock_manager_and_engineer(app_module):
     seed_paginated_data(app_module)
 
@@ -357,6 +414,7 @@ def test_command_payment_and_reception_flow_updates_statuses(app_module):
         data={
             'date_reception': date.today().isoformat(),
             'bon_livraison': 'BL-001',
+            'magasin_reception': 'Magasin SAV',
         },
         follow_redirects=True,
     )
@@ -367,6 +425,7 @@ def test_command_payment_and_reception_flow_updates_statuses(app_module):
         assert commande is not None
         assert commande.date_reception == date.today()
         assert commande.bon_livraison == 'BL-001'
+        assert commande.magasin_reception == 'Magasin SAV'
         assert commande.est_achevee()
         assert commande.get_statut_avancement() == app_module.Commande.PHASE_ACHEVEE
 

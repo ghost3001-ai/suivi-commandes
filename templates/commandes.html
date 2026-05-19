@@ -156,6 +156,9 @@
                         </td>
                         <td>
                             <div>{{ c.get_niveau_processus() }}</div>
+                            {% if c.magasin_reception %}
+                            <div class="small text-muted">Magasin: {{ c.magasin_reception }}</div>
+                            {% endif %}
                             {% if c.est_en_retard() and not c.est_achevee() %}
                             <div class="small text-danger">Retard: +{{ c.get_delai() }}j</div>
                             {% elif c.date_reception %}

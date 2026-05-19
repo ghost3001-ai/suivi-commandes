@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import tempfile
+from contextlib import suppress
 
 
 RESETTABLE_MODULES = ('app', 'config', 'models')
@@ -97,6 +98,14 @@ def main():
         print("Smoke test OK")
         return 0
     finally:
+        with suppress(Exception):
+            with app.app_context():
+                app_module.db.session.remove()
+                app_module.db.engine.dispose()
+        lock_handle = getattr(app_module, 'scheduler_lock_handle', None)
+        if lock_handle is not None and not lock_handle.closed:
+            with suppress(Exception):
+                lock_handle.close()
         temp_dir.cleanup()
 
 

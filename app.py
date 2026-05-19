@@ -11,7 +11,14 @@ import os
 import re
 import smtplib
 import time
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 from io import BytesIO, StringIO
 import json
 import unicodedata
@@ -196,7 +203,7 @@ ADMIN_MODEL_REGISTRY = OrderedDict([
         'label': 'Commandes',
         'model': Commande,
         'description': 'Commandes achats, paiement, réception et anomalies.',
-        'search': ['nr', 'bon_commande', 'facture', 'affaire', 'demandeur', 'acheteur'],
+        'search': ['nr', 'bon_commande', 'facture', 'affaire', 'demandeur', 'acheteur', 'magasin_reception'],
     }),
     ('fournisseurs', {
         'label': 'Fournisseurs',
@@ -1066,6 +1073,7 @@ def get_commande_form_values(commande=None, form_data=None):
         'facture': field_value('facture', ''),
         'date_reception': date_value('date_reception'),
         'bon_livraison': field_value('bon_livraison', ''),
+        'magasin_reception': field_value('magasin_reception', ''),
         'commentaire': field_value('commentaire', ''),
         'commande_conforme': checkbox_value('commande_conforme', default=True),
         'rupture_fournisseur': checkbox_value('rupture_fournisseur', default=False),
@@ -1220,11 +1228,12 @@ def apply_commande_reception_lines(commande, form_data):
             continue
 
         mouvement_type = MouvementStock.TYPE_ENTREE if delta > 0 else MouvementStock.TYPE_AJUSTEMENT
+        magasin_suffix = f" - magasin {commande.magasin_reception}" if commande.magasin_reception else ''
         appliquer_mouvement_stock(
             ligne.produit,
             delta,
             mouvement_type,
-            f'Réception commande {commande.bon_commande or commande.nr} - {ligne.produit.nom}',
+            f'Réception commande {commande.bon_commande or commande.nr} - {ligne.produit.nom}{magasin_suffix}',
         )
         ligne.quantite_recue = target_received
         movement_count += 1
@@ -1635,6 +1644,7 @@ COMMAND_IMPORT_FIELD_SPECS = OrderedDict([
     ('Fournisseur', {'label': 'Fournisseur', 'required': False, 'aliases': ['Fournisseur', 'Supplier']}),
     ('Affaire/Commande', {'label': 'Affaire/Commande', 'required': False, 'aliases': ['Affaire/Commande', 'Affaire', 'Commande', 'Objet']}),
     ('N° Bon commande', {'label': 'N° Bon commande', 'required': False, 'aliases': ['N° Bon commande', 'No Bon commande', 'Bon commande', 'BC']}),
+    ('Magasin Reception', {'label': 'Magasin Reception', 'required': False, 'aliases': ['Magasin Reception', 'Magasin reception', 'Magasin', 'Depot', 'Entrepot']}),
     ('Date Livraison', {'label': 'Date Livraison', 'required': False, 'aliases': ['Date Livraison', 'Livraison']}),
     ('Date Réception', {'label': 'Date Réception', 'required': False, 'aliases': ['Date Réception', 'Date reception', 'Réception']}),
     ('N° Bon Livraison', {'label': 'N° Bon Livraison', 'required': False, 'aliases': ['N° Bon Livraison', 'Bon Livraison', 'BL']}),
@@ -3023,6 +3033,7 @@ def import_commandes_dataframe(dataframe):
                 fournisseur_id=fournisseur.id if fournisseur else None,
                 affaire=str(row.get('Affaire/Commande')).strip() if pd.notna(row.get('Affaire/Commande')) else None,
                 bon_commande=bon_commande,
+                magasin_reception=str(row.get('Magasin Reception')).strip() if pd.notna(row.get('Magasin Reception')) else None,
                 date_livraison=parser_date_import(row.get('Date Livraison')),
                 date_reception=parser_date_import(row.get('Date Réception')),
                 bon_livraison=str(row.get('N° Bon Livraison')).strip() if pd.notna(row.get('N° Bon Livraison')) else None,
@@ -5554,6 +5565,7 @@ def build_dashboard_excel_bytes(filters, context=None):
         'Fournisseur': commande.fournisseur.nom if commande.fournisseur else None,
         'Affaire': commande.affaire,
         'Bon commande': commande.bon_commande,
+        'Magasin Reception': commande.magasin_reception,
         'Date livraison': commande.date_livraison,
         'Date réception': commande.date_reception,
         'Montant': commande.montant,
@@ -5987,6 +5999,7 @@ def build_supplier_detail_excel_bytes(fournisseur, filters, payload=None):
         'Statut': commande.statut,
         'Date livraison': commande.date_livraison,
         'Date réception': commande.date_reception,
+        'Magasin Reception': commande.magasin_reception,
         'Délai réel (j)': commande.get_ecart_livraison(),
         'Conforme': commande.commande_conforme,
         'Rupture': commande.rupture_fournisseur,
@@ -6011,6 +6024,7 @@ def build_supplier_detail_excel_bytes(fournisseur, filters, payload=None):
             'Statut': '',
             'Date livraison': '',
             'Date réception': '',
+            'Magasin Reception': '',
             'Délai réel (j)': '',
             'Conforme': '',
             'Rupture': '',
@@ -6450,6 +6464,22 @@ def process_dashboard_subscriptions():
                 db.session.rollback()
                 print(f"Erreur abonnement dashboard {subscription.email}: {exc}")
 
+def acquire_scheduler_lock(lock_file_path):
+    os.makedirs(os.path.dirname(lock_file_path) or '.', exist_ok=True)
+    lock_handle = open(lock_file_path, 'a+')
+    try:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        elif msvcrt is not None:
+            lock_handle.seek(0)
+            msvcrt.locking(lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            app.logger.warning('Scheduler lock unavailable on this platform')
+    except (BlockingIOError, OSError):
+        lock_handle.close()
+        return None
+    return lock_handle
+
 def start_dashboard_scheduler():
     """Démarre le scheduler d'envoi si activé par configuration."""
     global dashboard_scheduler, scheduler_lock_handle
@@ -6459,11 +6489,8 @@ def start_dashboard_scheduler():
 
     lock_file_path = app.config.get('SCHEDULER_LOCK_FILE')
     if lock_file_path:
-        os.makedirs(os.path.dirname(lock_file_path), exist_ok=True)
-        scheduler_lock_handle = open(lock_file_path, 'a+')
-        try:
-            fcntl.flock(scheduler_lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+        scheduler_lock_handle = acquire_scheduler_lock(lock_file_path)
+        if scheduler_lock_handle is None:
             app.logger.info('Dashboard scheduler not started in this process: lock already held')
             return dashboard_scheduler
 
@@ -6750,6 +6777,7 @@ def commandes():
                 Commande.demandeur.contains(recherche),
                 Commande.service_demandeur.contains(recherche),
                 Commande.bon_commande.contains(recherche),
+                Commande.magasin_reception.contains(recherche),
                 Commande.facture.contains(recherche),
             )
         )
@@ -6870,6 +6898,7 @@ def ajouter_commande():
                 date_livraison=parse_commande_date_input(request.form.get('date_livraison'), 'Date livraison', obligatoire=True),
                 date_reception=date_reception,
                 bon_livraison=bon_livraison,
+                magasin_reception=nettoyer_texte_optionnel(request.form.get('magasin_reception')),
                 facture=facture,
                 montant=montant,
                 avance=avance,
@@ -6963,6 +6992,7 @@ def modifier_commande(id):
                     'affaire': valider_texte_requis(request.form.get('affaire'), 'Affaire / Description'),
                     'bon_commande': valider_texte_requis(request.form.get('bon_commande'), 'N° Bon commande'),
                     'date_livraison': parse_commande_date_input(request.form.get('date_livraison'), 'Date livraison', obligatoire=True),
+                    'magasin_reception': nettoyer_texte_optionnel(request.form.get('magasin_reception')),
                     'montant': valider_montant(montant_input),
                     'commande_conforme': 'commande_conforme' in request.form,
                     'rupture_fournisseur': 'rupture_fournisseur' in request.form,
@@ -6991,6 +7021,7 @@ def modifier_commande(id):
                     'Date réception réelle',
                 )
                 updated_values['bon_livraison'] = request.form.get('bon_livraison')
+                updated_values['magasin_reception'] = nettoyer_texte_optionnel(request.form.get('magasin_reception'))
 
             target_montant = updated_values.get('montant', float(commande.montant or 0))
             target_avance = updated_values.get('avance', float(commande.avance or 0))
@@ -8141,6 +8172,7 @@ def exporter_excel():
             'Fournisseur': c.fournisseur.nom if c.fournisseur else '',
             'Affaire/Commande': c.affaire,
             'N° Bon commande': c.bon_commande,
+            'Magasin Reception': c.magasin_reception,
             'Date Livraison': c.date_livraison,
             'Date Réception': c.date_reception,
             'N° Bon Livraison': c.bon_livraison,
@@ -8355,6 +8387,7 @@ def migrate_existing_schema():
         'commandes': {
             'date_paiement': 'DATE',
             'date_reception': 'DATE',
+            'magasin_reception': 'VARCHAR(120)',
             'prix_reference_marche': 'FLOAT',
             'commande_conforme': 'BOOLEAN',
             'rupture_fournisseur': 'BOOLEAN',
@@ -8408,6 +8441,7 @@ def migrate_existing_schema():
         "CREATE INDEX IF NOT EXISTS idx_commandes_date_livraison ON commandes (date_livraison)",
         "CREATE INDEX IF NOT EXISTS idx_commandes_date_reception ON commandes (date_reception)",
         "CREATE INDEX IF NOT EXISTS idx_commandes_bon_commande ON commandes (bon_commande)",
+        "CREATE INDEX IF NOT EXISTS idx_commandes_magasin_reception ON commandes (magasin_reception)",
         "CREATE INDEX IF NOT EXISTS idx_commandes_facture ON commandes (facture)",
         "CREATE INDEX IF NOT EXISTS idx_commandes_conforme ON commandes (commande_conforme)",
         "CREATE INDEX IF NOT EXISTS idx_commandes_rupture ON commandes (rupture_fournisseur)",
