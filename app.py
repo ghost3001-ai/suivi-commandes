@@ -368,10 +368,8 @@ def ensure_database_ready(force=False):
 
     inspector = inspect(db.engine)
     existing_tables = set(inspector.get_table_names())
-    bootstrapped = False
-    if 'utilisateurs' not in existing_tables:
-        init_db()
-        bootstrapped = True
+    bootstrapped = 'utilisateurs' not in existing_tables
+    init_db()
 
     database_bootstrap_uri = database_uri
     return bootstrapped
@@ -8364,6 +8362,15 @@ def page_not_found(e):
 
 @app.errorhandler(500)
 def internal_server_error(e):
+    db.session.rollback()
+    original_exception = getattr(e, 'original_exception', None)
+    if original_exception is not None:
+        app.logger.error(
+            'Unhandled server error',
+            exc_info=(type(original_exception), original_exception, original_exception.__traceback__),
+        )
+    else:
+        app.logger.exception('Unhandled server error')
     return render_template('errors/500.html'), 500
 
 # ==================== INITIALISATION ====================
@@ -8485,9 +8492,10 @@ def migrate_existing_schema():
                 if column_name in existing_columns:
                     continue
                 try:
-                    connection.execute(
-                        text(f'ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}')
-                    )
+                    alter_sql = f'ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}'
+                    if dialect_name == 'postgresql':
+                        alter_sql = f'ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}'
+                    connection.execute(text(alter_sql))
                     print(f"Colonne ajoutée: {table_name}.{column_name}")
                 except OperationalError as exc:
                     if 'duplicate column name' not in str(exc).lower():
